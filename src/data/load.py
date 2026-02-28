@@ -23,8 +23,8 @@ class DataPaths:
 
 
 def read_csv(path: Path) -> pd.DataFrame:
-    # Tenta ler com separador padrão; se falhar, você pode ajustar aqui.
-    return pd.read_csv(path)
+    # PEDE usa separador ';'
+    return pd.read_csv(path, sep=";", engine="python", encoding="utf-8")
 
 
 def load_years(paths: DataPaths) -> dict[int, pd.DataFrame]:
