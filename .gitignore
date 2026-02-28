@@ -1,29 +1,61 @@
-# Ambiente virtual
-.venv/
-
-# Python
+# ===== Python / bytecode =====
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
 
-# Jupyter
-.ipynb_checkpoints/
+# ===== Virtual env =====
+.venv/
+venv/
+ENV/
+env/
 
-# MacOS
-.DS_Store
+# ===== Packaging / build =====
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
 
-# VS Code
-.vscode/
-
-# Dados brutos
-data/raw/
-
-# Modelos treinados
-artifacts/models/
-
-# Coverage
-htmlcov/
+# ===== Test / coverage =====
+.pytest_cache/
 .coverage
+.coverage.*
+htmlcov/
+.cover/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
 
-# Logs
+# ===== Type checking =====
+.mypy_cache/
+.pyre/
+.pytype/
+
+# ===== Lint / format =====
+.ruff_cache/
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== Editors =====
+.vscode/
+.idea/
+
+# ===== Logs =====
 *.log
+
+# ===== Project-specific =====
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+artifacts/*
+!artifacts/.gitkeep
+!artifacts/models/.gitkeep
