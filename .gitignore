@@ -1,0 +1,29 @@
+# Ambiente virtual
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# MacOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# Dados brutos
+data/raw/
+
+# Modelos treinados
+artifacts/models/
+
+# Coverage
+htmlcov/
+.coverage
+
+# Logs
+*.log
