@@ -59,3 +59,6 @@ data/processed/*
 artifacts/*
 !artifacts/.gitkeep
 !artifacts/models/.gitkeep
+# Local artifacts
+/data/interim/
+/notebooks/
