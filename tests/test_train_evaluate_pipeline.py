@@ -1,3 +1,4 @@
+# tests/test_train_evaluate_pipeline.py
 from __future__ import annotations
 
 import json
@@ -8,19 +9,34 @@ import pandas as pd
 from src.pipelines.train import run_train
 
 
-def _write_csv_gz(path: Path, df: pd.DataFrame) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False, compression="gzip", sep=";")
+def _write_pair(processed_dir: Path, name: str, df: pd.DataFrame) -> None:
+    """
+    Escreve o par em parquet se possível (recomendado no pipeline atual),
+    caso contrário escreve csv.gz com sep=';'.
+    """
+    processed_dir.mkdir(parents=True, exist_ok=True)
+
+    # preferir parquet (se pyarrow estiver disponível no ambiente)
+    parquet_path = processed_dir / f"{name}.parquet"
+    try:
+        df.to_parquet(parquet_path, index=False, engine="pyarrow")
+        return
+    except Exception:
+        pass
+
+    csv_path = processed_dir / f"{name}.csv.gz"
+    df.to_csv(csv_path, index=False, compression="gzip", sep=";")
 
 
 def test_run_train_creates_artifacts(tmp_path: Path):
     processed_dir = tmp_path / "data" / "processed"
     artifacts_dir = tmp_path / "artifacts" / "models"
 
-    # dataset processado mínimo (já no formato do pair)
+    # dataset processado mínimo (formato pair)
+    # colunas normalizadas: 'ra', 'year_t', 'year_t1', 'y', features...
     pair_2022_2023 = pd.DataFrame(
         {
-            "ID": [1, 2, 3, 4],
+            "ra": ["1", "2", "3", "4"],
             "year_t": [2022] * 4,
             "year_t1": [2023] * 4,
             "y": [0, 1, 0, 1],
@@ -29,7 +45,7 @@ def test_run_train_creates_artifacts(tmp_path: Path):
     )
     pair_2023_2024 = pd.DataFrame(
         {
-            "ID": [1, 2, 3, 4],
+            "ra": ["1", "2", "3", "4"],
             "year_t": [2023] * 4,
             "year_t1": [2024] * 4,
             "y": [0, 0, 1, 1],
@@ -37,19 +53,19 @@ def test_run_train_creates_artifacts(tmp_path: Path):
         }
     )
 
-    _write_csv_gz(processed_dir / "pair_2022_2023.csv.gz", pair_2022_2023)
-    _write_csv_gz(processed_dir / "pair_2023_2024.csv.gz", pair_2023_2024)
+    _write_pair(processed_dir, "pair_2022_2023", pair_2022_2023)
+    _write_pair(processed_dir, "pair_2023_2024", pair_2023_2024)
 
-    out = run_train(processed_dir, artifacts_dir, id_col="ID", random_state=42)
+    # treino deve aceitar id_col='ra'
+    out = run_train(processed_dir, artifacts_dir, id_col="ra", random_state=42)
 
     assert "train" in out and "test" in out
-    assert (artifacts_dir).exists()
-    # deve ter criado um .joblib e um .json
+    assert artifacts_dir.exists()
+
     files = list(artifacts_dir.glob("*"))
     assert any(f.suffix == ".joblib" for f in files)
     assert any(f.suffix == ".json" for f in files)
 
-    # valida conteúdo básico do json
     metrics_files = [f for f in files if f.suffix == ".json"]
     payload = json.loads(metrics_files[0].read_text(encoding="utf-8"))
     assert "threshold" in payload

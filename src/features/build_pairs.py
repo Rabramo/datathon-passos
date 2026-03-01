@@ -1,3 +1,4 @@
+# src/features/build_pairs.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -36,7 +37,6 @@ def build_temporal_pair(
     - Features: SOMENTE colunas do ano t (df_t)
     - Target y: derivado SOMENTE de IAN no ano t+1 (df_t1)
     """
-
     if id_col is None:
         id_col = detect_id_column(df_t)
 
@@ -46,17 +46,19 @@ def build_temporal_pair(
     # validações
     assert_unique_id(df_t, id_col, year_t)
     assert_unique_id(df_t1, id_col, year_t1)
-    report = assert_common_ids(
-        df_t, df_t1, id_col, year_t, year_t1,
-        min_common=1,
-    )   
-    # manter só alunos presentes nos dois anos (inner join)
+
+    # se sua versão de assert_common_ids já tem min_common, você pode passar:
+    # report = assert_common_ids(df_t, df_t1, id_col, year_t, year_t1, min_common=1)
+    # senão, mantenha sem kwargs:
+    assert_common_ids(df_t, df_t1, id_col, year_t, year_t1)
+
+    # inner join por IDs comuns
     common_ids = set(df_t[id_col]).intersection(set(df_t1[id_col]))
     left = df_t[df_t[id_col].isin(common_ids)].copy()
 
     # alinhar df_t1 na mesma ordem do df_t
     right = df_t1[df_t1[id_col].isin(common_ids)].copy().set_index(id_col)
-    right = right.loc[left[id_col].values]  # alinha pela ordem de left
+    right = right.loc[left[id_col].values]
 
     # target vem SOMENTE do t+1
     if ian_col not in right.columns:
@@ -66,12 +68,12 @@ def build_temporal_pair(
     # features: SOMENTE colunas de t
     X = left.copy()
 
-    # remove colunas redundantes/operacionais do feature set (ex.: 'ano' do interim)
+    # remove colunas operacionais redundantes (ex.: 'ano' do interim)
     cols_to_drop = [c for c in drop_feature_cols if c in X.columns]
     if cols_to_drop:
         X = X.drop(columns=cols_to_drop)
 
-    # dataset final: [id, year_t, year_t1, y, features...]
+    # dataset final
     out = pd.DataFrame({id_col: left[id_col].values})
     out["year_t"] = int(year_t)
     out["year_t1"] = int(year_t1)
