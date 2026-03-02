@@ -39,15 +39,12 @@ def _align_pair_to_train_schema(df_train: pd.DataFrame, df_other: pd.DataFrame, 
     """
     Alinha o schema de features de df_other ao schema de df_train.
 
-    Motivo: pares 2022_2023 e 2023_2024 podem ter colunas diferentes (drift de schema),
-    e o ColumnTransformer exige que as colunas do predict existam como no fit.
-
     Estratégia:
     - calcula X_train e X_other via split_xy
     - adiciona colunas faltantes em X_other com NaN
     - remove colunas extras em X_other
     - reordena X_other para a mesma ordem de X_train
-    - reconstrói df_other preservando meta cols (id/year_t/year_t1/y)
+    - reconstrói df_other preservando meta cols (id/year_t/year_t1/y)s
     """
     X_train, _ = split_xy(df_train, spec)
     X_other, y_other = split_xy(df_other, spec)
@@ -89,6 +86,57 @@ def _schema_diff(df_train: pd.DataFrame, df_test: pd.DataFrame, spec: TrainSpec)
     extra = sorted(set(Xte.columns) - set(Xtr.columns))
     return missing, extra
 
+def _drop_all_nan_features(
+    df_ref_train: pd.DataFrame,
+    df_other: pd.DataFrame,
+    spec: TrainSpec,
+) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    """
+    Remove features que são 100% NaN no treino, e remove as mesmas do outro dataframe.
+    Isso evita o comportamento do sklearn de "pular" features sem valores observados,
+    o que causa drift entre treino e teste.
+
+    Retorna: (df_train_clean, df_other_clean, removed_cols)
+    """
+    X_train, y_train = split_xy(df_ref_train, spec)
+
+    removed_cols = [c for c in X_train.columns if X_train[c].isna().all()]
+    if not removed_cols:
+        return df_ref_train, df_other, []
+
+    # Remove de X_train e X_other
+    X_train = X_train.drop(columns=removed_cols)
+
+    X_other, y_other = split_xy(df_other, spec)
+    X_other = X_other.drop(columns=removed_cols, errors="ignore")
+
+    # Reconstrói dfs preservando meta cols (mas sem recolocar removed_cols como meta)
+    def rebuild(
+        original_df: pd.DataFrame,
+        X_new: pd.DataFrame,
+        y_new: pd.Series,
+        removed: list[str],
+    ) -> pd.DataFrame:
+        meta_cols: list[str] = []
+        for c in original_df.columns:
+            if c == spec.target_col:
+                continue
+            if c in removed:
+                continue
+            if c in X_new.columns:
+                continue
+            meta_cols.append(c)
+
+        out = original_df[meta_cols].copy()
+        out[spec.target_col] = y_new.to_numpy()
+        for c in X_new.columns:
+            out[c] = X_new[c].to_numpy()
+        return out
+
+    df_train_clean = rebuild(df_ref_train, X_train, y_train, removed_cols)
+    df_other_clean = rebuild(df_other, X_other, y_other, removed_cols)
+
+    return df_train_clean, df_other_clean, removed_cols
 
 def run_train(
     processed_dir: Path,
@@ -123,22 +171,36 @@ def run_train(
         if extra:
             print(f"[train] Exemplos extra_in_test: {extra[:10]}")
 
-    # alinha df_test ao schema do treino para evitar erro do ColumnTransformer
+    # alinha df_test ao schema do treino
     df_test_aligned = _align_pair_to_train_schema(df_train, df_test, spec)
 
+    # remove features 100% nulas no treino (e remove as mesmas do teste alinhado)
+    df_train_clean, df_test_clean, removed_all_nan = _drop_all_nan_features(df_train, df_test_aligned, spec)
+    if removed_all_nan:
+        print(f"[train] Removendo features 100% nulas no treino: {removed_all_nan}")
+
+    # (opcional) re-checagem de drift após limpeza (deve ficar zerado)
+    missing2, extra2 = _schema_diff(df_train_clean, df_test_clean, spec)
+    if missing2 or extra2:
+        print(f"[train] Schema drift após limpeza. missing_in_test={len(missing2)} extra_in_test={len(extra2)}")
+        if missing2:
+            print(f"[train] Exemplos missing_in_test: {missing2[:10]}")
+        if extra2:
+            print(f"[train] Exemplos extra_in_test: {extra2[:10]}")
+
     # treina modelo (pipeline inclui preprocess)
-    model = train_model(df_train, spec)
+    model = train_model(df_train_clean, spec)
 
     # threshold tuning no treino (max F1)
-    p_train = predict_proba_positive(model, df_train, spec)
-    _, y_train = split_xy(df_train, spec)
+    p_train = predict_proba_positive(model, df_train_clean, spec)
+    _, y_train = split_xy(df_train_clean, spec)
     thr = choose_threshold_max_f1(y_train.to_numpy(), p_train, ThresholdSpec())
 
     # métricas treino e teste
-    train_metrics = evaluate_dataset(df_train, p_train, thr, spec)
-    df_test_aligned = _align_pair_to_train_schema(df_train, df_test, spec)
-    p_test = predict_proba_positive(model, df_test_aligned, spec)
-    test_metrics = evaluate_dataset(df_test_aligned, p_test, thr, spec)
+    train_metrics = evaluate_dataset(df_train_clean, p_train, thr, spec)
+
+    p_test = predict_proba_positive(model, df_test_clean, spec)
+    test_metrics = evaluate_dataset(df_test_clean, p_test, thr, spec)
 
     ensure_dir(artifacts_dir)
     run_id = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
@@ -155,7 +217,11 @@ def run_train(
         "threshold": float(thr),
         "train": train_metrics,
         "test": test_metrics,
-        "schema_drift": {"missing_in_test": missing, "extra_in_test": extra},
+        "schema_drift": {
+            "missing_in_test": missing,
+            "extra_in_test": extra,
+            "removed_all_nan_in_train": removed_all_nan,
+        },
     }
     metrics_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return payload

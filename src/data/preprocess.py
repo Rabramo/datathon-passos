@@ -61,7 +61,7 @@ def _strip_accents(text: str) -> str:
 
 
 def normalize_colname(col: str) -> str:
-    col = col.strip()
+    col = str(col).strip()
     col = _strip_accents(col).lower()
     col = col.replace("º", "")
     col = re.sub(r"[\/\-\.\(\)]", " ", col)
@@ -93,6 +93,69 @@ def coerce_numeric(s: pd.Series) -> pd.Series:
     return pd.to_numeric(s2, errors="coerce")
 
 
+def _drop_cols_if_exist(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    existing = [c for c in cols if c in df.columns]
+    if existing:
+        return df.drop(columns=existing, errors="ignore")
+    return df
+
+
+# -----------------------------
+# Normalizações de schema (anti-drift)
+# -----------------------------
+
+def _coalesce_columns(df: pd.DataFrame, target: str, candidates: list[str]) -> pd.DataFrame:
+    """
+    Consolida várias colunas candidatas em uma coluna target,
+    mantendo valores existentes e preenchendo com alternativas (fillna).
+    Remove candidatas após a consolidação.
+    """
+    df = df.copy()
+    if target not in df.columns:
+        df[target] = pd.NA
+
+    for c in candidates:
+        if c in df.columns and c != target:
+            df[target] = df[target].fillna(df[c])
+            df = df.drop(columns=[c])
+    return df
+
+
+def _unify_pedra(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Garante que só exista 'pedra' (remove pedra_23, pedra_2023, etc).
+    """
+    df = df.copy()
+    pedra_variants = [c for c in df.columns if re.fullmatch(r"pedra_\d{2,4}", c)]
+    if pedra_variants:
+        # Consolida em 'pedra'
+        df = _coalesce_columns(df, target="pedra", candidates=pedra_variants)
+    return df
+
+
+def _drop_idade_sufixada(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Remove idade_22, idade_23, idade_2022 etc.
+    """
+    df = df.copy()
+    idade_cols = [c for c in df.columns if re.fullmatch(r"idade_\d{2,4}", c)]
+    if idade_cols:
+        df = df.drop(columns=idade_cols, errors="ignore")
+    return df
+
+
+def _derive_idade(df: pd.DataFrame, year: int) -> pd.DataFrame:
+    """
+    Idade deve ser derivada: idade = year - ano_nasc (quando possível).
+    Se existir 'idade' prévia, ela é sobrescrita pela derivada.
+    """
+    df = df.copy()
+    if "ano_nasc" in df.columns:
+        ano_nasc = coerce_numeric(df["ano_nasc"])
+        df["idade"] = year - ano_nasc
+    return df
+
+
 # -----------------------------
 # Drop conforme README
 # -----------------------------
@@ -120,7 +183,11 @@ def drop_baseline_columns(df: pd.DataFrame, keep_ra: bool = True) -> pd.DataFram
 # -----------------------------
 
 def _pick_pedra_col(df: pd.DataFrame) -> Optional[str]:
-    # tenta pedra_YY / pedra_YYYY; escolhe o maior sufixo
+    # após _unify_pedra, deve preferir "pedra"
+    if "pedra" in df.columns:
+        return "pedra"
+
+    # fallback: tenta pedra_YY / pedra_YYYY; escolhe o maior sufixo
     pedra_year = [c for c in df.columns if re.fullmatch(r"pedra_\d{2,4}", c)]
     if pedra_year:
 
@@ -130,19 +197,13 @@ def _pick_pedra_col(df: pd.DataFrame) -> Optional[str]:
 
         return sorted(pedra_year, key=suf)[-1]
 
-    if "pedra" in df.columns:
-        return "pedra"
     return None
 
 
 def add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    # idade_t = ano - ano_nasc
-    if "ano" in df.columns and "ano_nasc" in df.columns:
-        df["ano_nasc"] = coerce_numeric(df["ano_nasc"])
-        df["idade_t"] = coerce_numeric(df["ano"]) - df["ano_nasc"]
-
+    # idade = year - ano_nasc já foi derivada em preprocess_year_df
     # tenure = ano - ano_ingresso
     if "ano" in df.columns and "ano_ingresso" in df.columns:
         df["ano_ingresso"] = coerce_numeric(df["ano_ingresso"])
@@ -192,11 +253,13 @@ def coerce_common_types(df: pd.DataFrame) -> pd.DataFrame:
         "ingles",
         "ano_nasc",
         "ano_ingresso",
-        "idade_t",
-        "idade_22",  # se existir em algum ano
+        "idade",  # padronizado
+        "tenure",
+        "gap_fase",
+        "pedra_ord",
     }
 
-    # também sufixos _YY/_YYYY (se existirem)
+    # também sufixos _YY/_YYYY (se existirem nos raw)
     for c in df.columns:
         if re.fullmatch(r"(iaa|ian|ida|ieg|ips|ipv|ipp|matem|portug|ingles)_\d{2,4}", c):
             numeric_like.add(c)
@@ -206,7 +269,7 @@ def coerce_common_types(df: pd.DataFrame) -> pd.DataFrame:
             df[c] = coerce_numeric(df[c])
 
     # strings
-    for c in ["genero", "turma", "instituicao_de_ensino", "fase_ideal", "rec_psicologia", *REC_AV_COLS]:
+    for c in ["genero", "turma", "instituicao_de_ensino", "fase_ideal", "rec_psicologia", *REC_AV_COLS, "pedra"]:
         if c in df.columns:
             df[c] = clean_string(df[c])
 
@@ -234,8 +297,21 @@ def preprocess_year_df(df: pd.DataFrame, year: int, cfg: Optional[PreprocessConf
         "por": "portug",
         "ing": "ingles",
         "nome_anonimizado": "nome",  # cai na regra de drop
+        # Se algum ano veio com IPP em variação estranha, normalize aqui:
+        "ip_p": "ipp",
     }
     df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+
+    # Unifica pedra antes de qualquer coisa
+    df = _unify_pedra(df)
+
+    # Remove idade_22/idade_23 etc. e deriva idade padrão
+    df = _drop_idade_sufixada(df)
+    df = _derive_idade(df, year=year)
+
+    # Garantir schema: se ipp não existir no ano, cria coluna vazia
+    if "ipp" not in df.columns:
+        df["ipp"] = pd.NA
 
     # Drop por prefixos (captura variações tipo destaque_ipv_1, avaliador5, inde_23 etc.)
     drop_prefixes_extra = ("destaque_", "avaliador", "inde")
@@ -253,8 +329,11 @@ def preprocess_year_df(df: pd.DataFrame, year: int, cfg: Optional[PreprocessConf
     if cfg.create_features:
         df = add_engineered_features(df)
 
-    return df
+    # Garantir schema no final (depois de drops e renomes)
+    if "ipp" not in df.columns:
+        df["ipp"] = pd.NA
 
+    return df
 
 def _save_df(df: pd.DataFrame, out_path: Path) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
