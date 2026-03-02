@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import UTC, datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional
@@ -92,7 +93,8 @@ def load_model(
     Prioridade:
     1) env MODEL_PATH
     2) env ARTIFACT_PATH
-    3) latest em artifacts/models
+    3) artifacts/models/latest.json (ponteiro determinístico)
+    4) fallback: latest por nome em artifacts/models
 
     Threshold:
     - tenta ler metrics_<run_id>.json
@@ -102,7 +104,11 @@ def load_model(
     if env_path:
         p = Path(env_path)
     else:
-        p = find_latest_model(model_dir)
+        pointer = load_latest_pointer(model_dir)  # precisa existir no módulo
+        if pointer and pointer.get("model_path"):
+            p = Path(pointer["model_path"])
+        else:
+            p = find_latest_model(model_dir)
 
     if not p.exists():
         raise FileNotFoundError(f"Modelo não encontrado em: {p}")
@@ -121,3 +127,9 @@ def load_model(
         model_path=str(p),
         run_id=run_id,
     )
+
+def load_latest_pointer(model_dir: Path) -> Optional[dict]:
+    p = model_dir / "latest.json"
+    if not p.exists():
+        return None
+    return json.loads(p.read_text(encoding="utf-8"))
