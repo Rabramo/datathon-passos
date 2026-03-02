@@ -62,3 +62,6 @@ artifacts/*
 # Local artifacts
 /data/interim/
 /notebooks/
+
+# model selection pointer
+artifacts/models/latest.json
