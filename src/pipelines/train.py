@@ -64,13 +64,17 @@ def _align_pair_to_train_schema(df_train: pd.DataFrame, df_other: pd.DataFrame, 
 
     # reconstrói df_other mantendo meta cols
     meta_cols = []
+    extra_set = set(extra)  # colunas extras detectadas em X_other vs X_train
     for c in df_other.columns:
         if c == spec.target_col:
+            continue
+        # NÃO manter extras do df_other (ex.: feat_extra) como meta
+        if c in extra_set:
             continue
         if c in X_other.columns:
             continue
         meta_cols.append(c)
-
+        
     out = df_other[meta_cols].copy()
     out[spec.target_col] = y_other.to_numpy()
     for c in X_other.columns:
