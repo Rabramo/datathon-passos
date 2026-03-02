@@ -42,3 +42,15 @@ def predict(req: PredictRequest) -> PredictResponse:
         threshold=float(loaded.threshold),
         model_path=loaded.model_path,
     )
+
+@app.get("/health")
+def health() -> dict[str, str]:
+    loaded = getattr(app.state, "loaded_model", None)
+    if loaded is None:
+        return {"status": "ok", "model_loaded": "false"}
+    return {
+        "status": "ok",
+        "model_loaded": "true",
+        "model_path": loaded.model_path,
+        "run_id": str(loaded.run_id),
+    }
