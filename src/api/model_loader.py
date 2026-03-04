@@ -1,135 +1,104 @@
-#srf/api/model_loader.py
-
+# src/api/model_loader.py
 from __future__ import annotations
 
 import json
-import os
-import re
-from datetime import UTC, datetime
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import joblib
 
 
-@dataclass(frozen=True)
-class LoadedModel:
-    pipeline: Any
-    feature_cols: List[str]
-    threshold: float
-    model_path: str
-    run_id: Optional[str]
+def _read_json(path: Path) -> Dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def find_latest_model(model_dir: Path) -> Path:
-    candidates = sorted(model_dir.glob("model_logreg_*.joblib"))
+def _resolve_model_dir(model_dir: str | Path) -> Path:
+    p = Path(model_dir)
+    return p if p.is_absolute() else Path.cwd() / p
+
+
+def _latest_pointer_path(model_dir: Path, model_name: str) -> Path:
+    # default pointer per model
+    return model_dir / f"latest_{model_name}.json"
+
+
+def _legacy_latest_path(model_dir: Path) -> Path:
+    # legacy pointer
+    return model_dir / "latest.json"
+
+
+def _find_latest_joblib(model_dir: Path) -> Path:
+    """
+    Fallback: find newest .joblib inside model_dir.
+    Prefer files that look like model artifacts: model_*.joblib
+    """
+    candidates = sorted(model_dir.glob("model_*.joblib"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not candidates:
+        candidates = sorted(model_dir.glob("*.joblib"), key=lambda p: p.stat().st_mtime, reverse=True)
+
     if not candidates:
         raise FileNotFoundError(f"Nenhum modelo encontrado em {model_dir}")
-    return candidates[-1]
+
+    return candidates[0]
 
 
-def parse_run_id_from_model_path(p: Path) -> Optional[str]:
-    # model_logreg_YYYYMMDD_HHMMSS.joblib
-    m = re.match(r"model_logreg_(\d{8}_\d{6})\.joblib$", p.name)
-    return m.group(1) if m else None
+def _load_from_pointer(pointer_path: Path) -> Tuple[Path, Dict[str, Any]]:
+    meta = _read_json(pointer_path)
+    if "model_path" not in meta:
+        raise KeyError(f"Arquivo {pointer_path} não contém a chave obrigatória 'model_path'")
 
+    model_path = Path(meta["model_path"])
+    # allow relative paths in JSON
+    if not model_path.is_absolute():
+        model_path = Path.cwd() / model_path
 
-def extract_feature_columns(pipeline: Any) -> List[str]:
-    """
-    Extrai colunas esperadas pelo ColumnTransformer no step 'preprocess'.
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model path do ponteiro não existe: {model_path}")
 
-    Compatibilidade:
-    - Se o pipeline NÃO tiver step 'preprocess' (ex.: modelo dummy nos testes),
-      retorna [] e o predict faz fallback para DataFrame(payload) sem alinhamento.
-    """
-    if not hasattr(pipeline, "named_steps") or "preprocess" not in getattr(pipeline, "named_steps", {}):
-        return []
-
-    pre = pipeline.named_steps["preprocess"]
-    cols: List[str] = []
-    for _, _, col_spec in getattr(pre, "transformers", []):
-        if col_spec is None:
-            continue
-        if isinstance(col_spec, (list, tuple)):
-            cols.extend(list(col_spec))
-
-    seen = set()
-    out: List[str] = []
-    for c in cols:
-        if c not in seen:
-            seen.add(c)
-            out.append(c)
-    return out
-
-
-def load_threshold_for_run(model_dir: Path, run_id: Optional[str]) -> Optional[float]:
-    """
-    Busca threshold no arquivo metrics_<run_id>.json.
-    Retorna None se não encontrar ou se run_id for None.
-    """
-    if not run_id:
-        return None
-    metrics_path = model_dir / f"metrics_{run_id}.json"
-    if not metrics_path.exists():
-        return None
-
-    data = json.loads(metrics_path.read_text(encoding="utf-8"))
-    thr = data.get("threshold")
-    if thr is None:
-        return None
-    return float(thr)
+    return model_path, meta
 
 
 def load_model(
+    model_dir: str | Path = "artifacts/models",
     *,
-    model_dir: Path = Path("artifacts/models"),
-    model_path_env: str = "MODEL_PATH",
-    artifact_path_env: str = "ARTIFACT_PATH",
-    default_threshold: float = 0.5,
-) -> LoadedModel:
+    model_name: str = "tree",
+    return_meta: bool = False,
+):
     """
-    Carrega modelo.
-    Prioridade:
-    1) env MODEL_PATH
-    2) env ARTIFACT_PATH
-    3) artifacts/models/latest.json (ponteiro determinístico)
-    4) fallback: latest por nome em artifacts/models
+    Loads a trained model artifact.
 
-    Threshold:
-    - tenta ler metrics_<run_id>.json
-    - fallback para default_threshold
+    Default behavior:
+      1) artifacts/models/latest_tree.json
+      2) artifacts/models/latest.json
+      3) newest model_*.joblib (fallback)
+
+    Parameters
+    ----------
+    model_dir:
+        Directory containing model artifacts and pointer files.
+    model_name:
+        Which pointer to prefer (default: tree).
+    return_meta:
+        If True, returns (model, meta). If False, returns model only (backwards compatible).
     """
-    env_path = os.getenv(model_path_env) or os.getenv(artifact_path_env)
-    if env_path:
-        p = Path(env_path)
-    else:
-        pointer = load_latest_pointer(model_dir)  # precisa existir no módulo
-        if pointer and pointer.get("model_path"):
-            p = Path(pointer["model_path"])
-        else:
-            p = find_latest_model(model_dir)
+    model_dir_path = _resolve_model_dir(model_dir)
 
-    if not p.exists():
-        raise FileNotFoundError(f"Modelo não encontrado em: {p}")
+    # 1) Prefer latest_<model>.json
+    ptr = _latest_pointer_path(model_dir_path, model_name)
+    if ptr.exists():
+        model_path, meta = _load_from_pointer(ptr)
+        model = joblib.load(model_path)
+        return (model, meta) if return_meta else model
 
-    pipeline = joblib.load(p)
-    feature_cols = extract_feature_columns(pipeline)
-    run_id = parse_run_id_from_model_path(p)
+    # 2) Fallback: latest.json
+    legacy = _legacy_latest_path(model_dir_path)
+    if legacy.exists():
+        model_path, meta = _load_from_pointer(legacy)
+        model = joblib.load(model_path)
+        return (model, meta) if return_meta else model
 
-    thr = load_threshold_for_run(model_dir, run_id)
-    threshold = float(default_threshold if thr is None else thr)
-
-    return LoadedModel(
-        pipeline=pipeline,
-        feature_cols=feature_cols,
-        threshold=threshold,
-        model_path=str(p),
-        run_id=run_id,
-    )
-
-def load_latest_pointer(model_dir: Path) -> Optional[dict]:
-    p = model_dir / "latest.json"
-    if not p.exists():
-        return None
-    return json.loads(p.read_text(encoding="utf-8"))
+    # 3) Last resort: newest joblib
+    model_path = _find_latest_joblib(model_dir_path)
+    model = joblib.load(model_path)
+    meta = {"model_path": str(model_path), "model_name": None, "run_id": None, "source": "fallback_newest_joblib"}
+    return (model, meta) if return_meta else model
