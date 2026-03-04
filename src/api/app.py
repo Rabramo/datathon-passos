@@ -1,56 +1,86 @@
 # src/api/app.py
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException
 
 from src.api.model_loader import LoadedModel, load_model
-from src.api.predict import predict_one
-from src.api.schemas import PredictRequest, PredictResponse
-
-app = FastAPI(title="Passos Mágicos - Defasagem API")
+from src.api.predict import router as predict_router
 
 
-def _get_loaded() -> LoadedModel:
+def _load_default_model() -> LoadedModel:
     """
-    Obtém o modelo carregado. Em ambientes de teste, o evento de startup pode não
-    ter sido executado antes do primeiro request; então fazemos lazy-load aqui.
+    Loads the default model (tree) via latest_tree.json when available.
+    Always returns LoadedModel(model, meta).
     """
-    loaded: LoadedModel | None = getattr(app.state, "loaded_model", None)
+    lm = load_model(return_meta=True)  # default model_name="tree" inside loader
+    if not isinstance(lm, LoadedModel):
+        # Defensive: in case loader is changed to return tuple
+        raise RuntimeError("load_model(return_meta=True) must return LoadedModel")
+    return lm
+
+
+def _get_loaded(app: FastAPI) -> LoadedModel:
+    """
+    Get cached model. If not loaded (e.g. tests not running lifespan),
+    loads it on demand.
+    """
+    loaded: Optional[LoadedModel] = getattr(app.state, "loaded", None)
     if loaded is None:
-        loaded = load_model()
-        app.state.loaded_model = loaded
+        loaded = _load_default_model()
+        app.state.loaded = loaded
     return loaded
 
 
-@app.on_event("startup")
-def _startup() -> None:
-    # Preload em runtime normal; nos testes, _get_loaded() cobre o caso.
-    app.state.loaded_model = load_model()
-
-
-@app.post("/predict", response_model=PredictResponse)
-def predict(req: PredictRequest) -> PredictResponse:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Preload on normal runtime; tests may skip lifespan, so _get_loaded covers that.
     try:
-        loaded = _get_loaded()
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        app.state.loaded = _load_default_model()
+    except Exception:
+        # Keep API up; /health will show model_loaded=false and /predict should return 503
+        app.state.loaded = None
+    yield
 
-    pred, proba = predict_one(loaded, req)
-    return PredictResponse(
-        prediction=pred,
-        proba=proba,
-        threshold=float(loaded.threshold),
-        model_path=loaded.model_path,
-    )
+
+app = FastAPI(title="Passos Mágicos - Defasagem API", lifespan=lifespan)
+
+# Routes
+app.include_router(predict_router)
+
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    loaded = getattr(app.state, "loaded_model", None)
+    loaded: Optional[LoadedModel] = getattr(app.state, "loaded", None)
     if loaded is None:
         return {"status": "ok", "model_loaded": "false"}
+
+    meta = loaded.meta or {}
     return {
         "status": "ok",
         "model_loaded": "true",
-        "model_path": loaded.model_path,
-        "run_id": str(loaded.run_id),
+        "model_path": str(meta.get("model_path", "unknown")),
+        "model_name": str(meta.get("model_name", "unknown")),
+        "run_id": str(meta.get("run_id", "unknown")),
+    }
+
+
+@app.get("/model")
+def model_info() -> dict[str, str]:
+    """
+    Optional: returns the model pointer currently loaded.
+    Useful for auditing which artifact is serving predictions.
+    """
+    try:
+        loaded = _get_loaded(app)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    meta = loaded.meta or {}
+    return {
+        "model_path": str(meta.get("model_path", "unknown")),
+        "model_name": str(meta.get("model_name", "unknown")),
+        "run_id": str(meta.get("run_id", "unknown")),
     }
