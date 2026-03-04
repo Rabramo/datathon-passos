@@ -65,3 +65,4 @@ artifacts/*
 
 # model selection pointer
 artifacts/models/latest.json
+catboost_info/
