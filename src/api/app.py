@@ -11,22 +11,14 @@ from src.api.predict import router as predict_router
 
 
 def _load_default_model() -> LoadedModel:
-    """
-    Loads the default model (tree) via latest_tree.json when available.
-    Always returns LoadedModel(model, meta).
-    """
-    lm = load_model(return_meta=True)  # default model_name="tree" inside loader
+    # Default model is tree via latest_tree.json (handled in loader)
+    lm = load_model(return_meta=True)
     if not isinstance(lm, LoadedModel):
-        # Defensive: in case loader is changed to return tuple
-        raise RuntimeError("load_model(return_meta=True) must return LoadedModel")
+        raise RuntimeError("load_model(return_meta=True) deve retornar LoadedModel")
     return lm
 
 
 def _get_loaded(app: FastAPI) -> LoadedModel:
-    """
-    Get cached model. If not loaded (e.g. tests not running lifespan),
-    loads it on demand.
-    """
     loaded: Optional[LoadedModel] = getattr(app.state, "loaded", None)
     if loaded is None:
         loaded = _load_default_model()
@@ -40,14 +32,25 @@ async def lifespan(app: FastAPI):
     try:
         app.state.loaded = _load_default_model()
     except Exception:
-        # Keep API up; /health will show model_loaded=false and /predict should return 503
         app.state.loaded = None
     yield
 
 
-app = FastAPI(title="Passos Mágicos - Defasagem API", lifespan=lifespan)
-
-# Routes
+app = FastAPI(
+    title="Passos Mágicos - Defasagem API",
+    version="1.0.0",
+    description=(
+        "**API desenvolvida para o Datathon 2026/MLOps - Pós Tech FIAP Machine Learning Engineering**\n\n"
+        "**Aluno**: Rogerio Abramo A. Pretti | RA 363736 | Grupo 150 | 5MLET\n\n"
+        "**Objetivo**:\n"
+        "Estimar a probabilidade de um aluno ter defasagem de aprendizado (y=1) no ano t+1, para que a Associação Primeiro Passos possa tomar medidas preventivas.\n\n"
+        "**Machine Learn Model padrão**:\n"
+        "Decision Tree carregado via artifacts/models/latest_tree.json.\n\n"
+        "**Documentação**:\n"
+        "A apresentação completa da API e regras de negócio estão em /docs."
+    ),
+    lifespan=lifespan,
+)
 app.include_router(predict_router)
 
 
@@ -69,10 +72,6 @@ def health() -> dict[str, str]:
 
 @app.get("/model")
 def model_info() -> dict[str, str]:
-    """
-    Optional: returns the model pointer currently loaded.
-    Useful for auditing which artifact is serving predictions.
-    """
     try:
         loaded = _get_loaded(app)
     except Exception as e:
