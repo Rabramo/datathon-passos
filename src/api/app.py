@@ -13,16 +13,30 @@ from fastapi.openapi.utils import get_openapi
 from src.api.model_loader import LoadedModel, load_model as load_loaded_model
 from src.api.predict import router as predict_router
 from src.api.feature_descriptions import router as feature_desc_router
-from src.api.feature_descriptions import get_feature_descriptions_map
+from src.api.leaderboard import router as leaderboard_router
+
+# -------------------------------------------------------------------
+# Observações (PT-BR)
+# -------------------------------------------------------------------
+# 1) include_router deve acontecer APÓS app = FastAPI(...)
+# 2) /health é leve (não carrega modelo)
+# 3) /smoke pode carregar o modelo e expõe features_esperadas
+# 4) OpenAPI (Swagger) recebe um example no POST /predict com todas as features
+#    extraídas do modelo (meta/raw_features preferido, senão feature_names_in_)
+# -------------------------------------------------------------------
 
 _START_TIME = time.time()
+
+# Cache para evitar recarregar modelo só para gerar o OpenAPI
 _OPENAPI_FEATURES_CACHE: Optional[List[str]] = None
 _OPENAPI_FEATURES_SOURCE: Optional[str] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # startup leve
     yield
+    # shutdown: nada
 
 
 def _uptime_seconds() -> int:
@@ -44,6 +58,10 @@ def _ensure_model_loaded(request: Request) -> LoadedModel:
 
 
 def _extract_features_from_meta(meta: dict) -> Tuple[List[str], str]:
+    """
+    Preferência: meta contém contrato "bruto" (ano t):
+      - raw_features / feature_columns / input_features
+    """
     for key in ("raw_features", "feature_columns", "input_features"):
         cols = meta.get(key)
         if isinstance(cols, list) and cols and all(isinstance(c, str) for c in cols):
@@ -52,14 +70,15 @@ def _extract_features_from_meta(meta: dict) -> Tuple[List[str], str]:
 
 
 def _extract_features_from_model(model: Any) -> Tuple[List[str], str]:
-    # A) feature_names_in_
+    """
+    Fallback: extrai do próprio modelo/pipeline.
+    """
     cols = getattr(model, "feature_names_in_", None)
     if cols is not None:
         out = [str(c) for c in list(cols)]
         if out:
             return out, "model.feature_names_in_"
 
-    # B) get_feature_names_out
     g = getattr(model, "get_feature_names_out", None)
     if callable(g):
         try:
@@ -69,7 +88,6 @@ def _extract_features_from_model(model: Any) -> Tuple[List[str], str]:
         except Exception:
             pass
 
-    # C) pipeline.named_steps -> procurar transformador com get_feature_names_out
     named_steps = getattr(model, "named_steps", None)
     if isinstance(named_steps, dict) and named_steps:
         for step_name, step_obj in named_steps.items():
@@ -82,16 +100,6 @@ def _extract_features_from_model(model: Any) -> Tuple[List[str], str]:
                 except Exception:
                     pass
 
-            # ColumnTransformer costuma expor get_feature_names_out no próprio objeto
-            g3 = getattr(step_obj, "get_feature_names_out", None)
-            if callable(g3):
-                try:
-                    out = [str(c) for c in list(g3())]
-                    if out:
-                        return out, f"pipeline.step[{step_name}].ColumnTransformer.get_feature_names_out"
-                except Exception:
-                    pass
-
     return [], "model.nao_expoe_features"
 
 
@@ -99,12 +107,10 @@ def _get_expected_features(lm: LoadedModel) -> Tuple[List[str], str]:
     meta = lm.meta or {}
     model = lm.model
 
-    # Preferência: features "brutas" declaradas no meta (contrato ideal do /predict)
     cols, src = _extract_features_from_meta(meta)
     if cols:
         return cols, src
 
-    # Fallback: features do modelo/pipeline (pode ser pós-transformação)
     cols2, src2 = _extract_features_from_model(model)
     if cols2:
         return cols2, src2
@@ -113,12 +119,17 @@ def _get_expected_features(lm: LoadedModel) -> Tuple[List[str], str]:
 
 
 def _build_predict_example_payload(expected_features: List[str]) -> Dict[str, Any]:
-    # Placeholder simples: o objetivo é o Swagger renderizar todas as chaves.
+    """
+    Exemplo simples para Swagger: todas as chaves com 0 como placeholder.
+    """
     return {f: 0 for f in expected_features}
 
 
 def _inject_predict_example_into_openapi(app: FastAPI) -> None:
-
+    """
+    Injeta example no POST /predict para o Swagger exibir todas as features.
+    Se falhar, não deve quebrar /openapi.json.
+    """
     schema = app.openapi_schema
     if not schema:
         return
@@ -133,14 +144,12 @@ def _inject_predict_example_into_openapi(app: FastAPI) -> None:
 
     feats = _OPENAPI_FEATURES_CACHE or []
     src = _OPENAPI_FEATURES_SOURCE or "nenhuma"
-
     if not feats:
         return
 
     paths = schema.get("paths", {})
     predict_item = paths.get("/predict")
     if not isinstance(predict_item, dict):
-
         return
 
     post_op = predict_item.get("post")
@@ -164,9 +173,14 @@ def _inject_predict_example_into_openapi(app: FastAPI) -> None:
         }
     }
 
+    # garante editor genérico se necessário
     if "schema" not in app_json or not isinstance(app_json["schema"], dict):
         app_json["schema"] = {"type": "object", "additionalProperties": True}
 
+
+# -------------------------------------------------------------------
+# Criação do app (ANTES de include_router)
+# -------------------------------------------------------------------
 
 app = FastAPI(
     title="Passos Mágicos - Defasagem API",
@@ -177,20 +191,29 @@ app = FastAPI(
         "**Objetivo**:\n"
         "Estimar a probabilidade de um aluno ter defasagem de aprendizado (y=1) no ano t+1, "
         "para que a Associação Primeiro Passos possa tomar medidas preventivas.\n\n"
-        "**Documentação**:\n"
-        "A apresentação completa da API e regras de negócio estão em /docs."
     ),
     lifespan=lifespan,
     openapi_tags=[
-        {"name": "Infra", "description": "Liveness/readiness e diagnósticos operacionais"},
-        {"name": "Análise de Risco de Defasagem", "description": "Aplicação do modelo preditivo para análise de risco de defasagem de aprendizado"},
+        {"name": "Infra", "description": "Diagnósticos operacionais"},
+        {"name": "Análise de Risco de Defasagem", "description": "Inferência e inspeção do contrato de entrada"},
+        {"name": "Leaderboard", "description": "Resultados (leaderboard.csv)"},
     ],
     docs_url=None,
     redoc_url=None,
 )
 
-app.include_router(feature_desc_router)
 
+# -------------------------------------------------------------------
+# Routers (APÓS app existir)
+# -------------------------------------------------------------------
+app.include_router(feature_desc_router)
+app.include_router(leaderboard_router)
+app.include_router(predict_router)
+
+
+# -------------------------------------------------------------------
+# OpenAPI custom (Swagger)
+# -------------------------------------------------------------------
 def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
@@ -204,11 +227,11 @@ def custom_openapi():
     )
     app.openapi_schema = schema
 
-    # Injeção do example para o Swagger (não pode derrubar a API)
     try:
         _inject_predict_example_into_openapi(app)
-    except Exception:
-        pass
+    except Exception as e:
+        # não derruba /openapi.json
+        print(f"[openapi] example injection skipped: {type(e).__name__}: {e}")
 
     return app.openapi_schema
 
@@ -216,6 +239,9 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 
+# -------------------------------------------------------------------
+# Endpoints Infra
+# -------------------------------------------------------------------
 @app.get("/docs", include_in_schema=True, tags=["Infra"], summary="Documentação interativa (Swagger UI)")
 def custom_docs():
     return get_swagger_ui_html(
@@ -228,7 +254,12 @@ def custom_docs():
     )
 
 
-@app.get("/health", tags=["Infra"], summary="Batimentos OK?", description="Endpoint de health check para validar se a API está rodando e se o modelo está em cache."  )
+@app.get(
+    "/health",
+    tags=["Infra"],
+    summary="Batimentos OK?",
+    description="Endpoint de health check para validar se a API está rodando e se o modelo está em cache.",
+)
 def health(request: Request) -> Dict[str, Any]:
     cached = _get_cached_model(request)
     return {
@@ -238,9 +269,12 @@ def health(request: Request) -> Dict[str, Any]:
     }
 
 
-
-
-@app.get("/smoke", tags=["Infra"], summary="Ligou sem Explodir?", description="Endpoint de smoke test para validar se o modelo carrega e roda predict_proba."  )
+@app.get(
+    "/smoke",
+    tags=["Infra"],
+    summary="Ligou sem Explodir?",
+    description="Endpoint de smoke test para validar se o modelo carrega e roda predict_proba.",
+)
 def smoke(
     request: Request,
     dry_run: bool = Query(default=False, description="Se true, roda predict_proba com dados sintéticos."),
@@ -281,7 +315,3 @@ def smoke(
         "features_esperadas": expected,
         "dry_run": dry,
     }
-
-
-
-app.include_router(predict_router)

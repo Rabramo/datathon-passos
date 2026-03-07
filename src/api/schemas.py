@@ -1,11 +1,25 @@
 # src/api/schemas.py
 from __future__ import annotations
-
-from typing import Any, Dict, Optional
-
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, ConfigDict
 
+class FeatureSelectionRequest(BaseModel):
+    name: Optional[str] = Field(
+        default="default",
+        description="Nome do conjunto de features (ex.: default, ablation_1).",
+    )
+    features: List[str] = Field(
+        ...,
+        description="Lista de nomes de features que o usuário deseja usar/enviar.",
+        min_length=1,
+    )
 
+class FeatureSelectionResponse(BaseModel):
+    status: str = Field(default="ok")
+    name: str
+    n_selected: int
+    selected_features: List[str]
+    
 class PredictRequest(BaseModel):
     """
     Payload de inferência.
