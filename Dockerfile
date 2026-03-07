@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Código
 COPY src /app/src
 COPY pyproject.toml /app/pyproject.toml
+COPY artifacts /app/artifacts
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app

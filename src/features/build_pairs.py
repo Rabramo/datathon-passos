@@ -58,7 +58,7 @@ def build_temporal_pair(
 
     # alinhar df_t1 na mesma ordem do df_t
     right = df_t1[df_t1[id_col].isin(common_ids)].copy().set_index(id_col)
-    right = right.loc[left[id_col].values]
+    right = right.loc[left[id_col].values.tolist()]
 
     # target vem SOMENTE do t+1
     if ian_col not in right.columns:
