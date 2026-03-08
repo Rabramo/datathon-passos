@@ -15,15 +15,6 @@ from src.api.predict import router as predict_router
 from src.api.feature_descriptions import router as feature_desc_router
 from src.api.leaderboard import router as leaderboard_router
 
-# -------------------------------------------------------------------
-# Observações (PT-BR)
-# -------------------------------------------------------------------
-# 1) include_router deve acontecer APÓS app = FastAPI(...)
-# 2) /health é leve (não carrega modelo)
-# 3) /smoke pode carregar o modelo e expõe features_esperadas
-# 4) OpenAPI (Swagger) recebe um example no POST /predict com todas as features
-#    extraídas do modelo (meta/raw_features preferido, senão feature_names_in_)
-# -------------------------------------------------------------------
 
 _START_TIME = time.time()
 
