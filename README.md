@@ -1,51 +1,202 @@
-## Arquivos de Dados
+# Datathon FIAP MLE - Passos Mágicos
 
-Os arquivos intermediários (**data/interim**) são gerados em formato **Parquet** para preservar tipos, reduzir tamanho e acelerar IO.  
-Os dados originais permanecem em **data/raw** no formato fornecido **.csv**.
+Projeto de Machine Learning Engineering para estimar risco de defasagem escolar (`y=1`) no ano `t+1` usando apenas variáveis observáveis no ano `t`.
 
-## Exclusão de colunas dos dados originais e criação de features
+O repositório implementa o ciclo ponta a ponta solicitado no Datathon: preparação de dados, treino temporal, avaliação, API de inferência, testes automatizados e containerização.
 
-Para garantir **reprodutibilidade** e **ausência de vazamento temporal**, e minimizar **sobreajuste**, foram excluídas variáveis originais.  
-Os dados pessoais foram **anonimizados na origem**, não exigindo tratamento adicional de **PII (Personally Identifiable Information)**.
+## Objetivo de negócio
 
-### Colunas excluídas (critérios)
+Apoiar decisões preventivas da Associação Passos Mágicos, priorizando alunos com maior probabilidade de defasagem futura para direcionamento pedagógico antecipado.
 
-- **Redundância**
-  - A coluna **Nome** foi excluída pois é redundante com **RA (Registro Acadêmico)**, que será mantido apenas como **chave de junção** entre anos e para auditoria.
-  - A coluna **INDE (Índice do Desenvolvimento Educacional)** foi excluída pois é derivada de **7 indicadores** mantidos como features e utilizada na determinação da coluna **Pedra**.
+## Visão geral da solução
 
-- **Texto livre**
-  - Como não será utilizada **NLP (Natural Language Processing)**, foram excluídas do baseline as colunas com texto livre:
-    - **Destaque IEG**, **Destaque IDA**, **Destaque IPV**.
+Pipeline temporal:
+1. Ingestão de dados brutos (`data/raw`).
+2. Pré-processamento e normalização (`data/interim`).
+3. Construção de pares `t -> t+1` e geração do alvo (`data/processed`).
+4. Treinamento e comparação de modelos (artefatos em `artifacts/models` e `artifacts/metrics`).
+5. Exposição via API FastAPI (`/predict`, `/train`, `/infra`, `/leaderboard`).
+6. Avaliação offline e rastreabilidade (métricas, ponteiros `latest_*.json`, leaderboard).
 
-- **Alta cardinalidade / viés**
-  - As colunas **Avaliador1** a **Avaliador6** foram removidas por alta cardinalidade e potencial de viés.
+## Regras de modelagem temporal e anti-vazamento
 
-- **Rankings dependentes do conjunto**
-  - **Cg**, **Cf**, **Ct** (classificações/rankings) não são usados no baseline porque podem depender da distribuição do grupo no ano e dificultam replicação em inferência individual via API.
+- A predição é sempre `t -> t+1`.
+- Features de entrada incluem apenas dados do ano `t`.
+- Colunas de alvo/futuro são bloqueadas na borda da API.
+- O alvo binário é derivado de `IAN(t+1)` conforme regra do projeto.
 
-## Colunas mantidas como features (ano `t`)
+## Estrutura principal
 
-- Variáveis demográficas e de contexto:
-  - **Gênero**, **Ano nasc/idade**, **Ano ingresso**, **Instituição de ensino**, **Turma**, **Fase**.
-- Indicadores quantitativos do acompanhamento no ano `t`:
-  - **IAA (Autoavaliação)**, **IAN (Adequação de Nível)**, **IDA (Desempenho Acadêmico)**, **IEG (Engajamento)**, **IPP (Psicopedagógico)**, **IPS (Psicossocial)**, **IPV (Ponto de Virada)**.
-- Notas:
-  - **Matemática**, **Português**, **Inglês** (após conversão para numérico).
-- Variáveis históricas e recomendações:
-  - **Pedra**, **Rec Av1** a **Rec Av4**, **Rec Psicologia** (com tratamento de valores ausentes).
+- `src/data`: carga, limpeza e padronização.
+- `src/features`: montagem de pares temporais.
+- `src/pipelines`: execução de build, treino e avaliação.
+- `src/models`: treino, tuning, comparação e utilidades de modelo.
+- `src/api`: aplicação FastAPI, schemas e roteadores.
+- `tests`: suíte de testes unitários/integrados.
+- `artifacts`: modelos, métricas, leaderboard e ponteiros.
 
-## Criação de features
+## Tecnologias
 
-Além das colunas originais, criamos atributos derivados para capturar padrões temporais e melhorar interpretabilidade:
+- Python 3.12
+- pandas, numpy, pyarrow, scikit-learn
+- xgboost, catboost
+- FastAPI + Uvicorn
+- joblib para serialização
+- pytest + coverage
+- Docker
 
-- **Idade no ano `t`**: calculada a partir de **Ano nasc** (evita dependência de uma coluna específica como “Idade 22”).
-- **Tempo de ingresso**: `ano_t - Ano ingresso`.
-- **Gap de fase**: `Fase - Fase ideal` (medida direta de defasagem escolar).
-- **Codificação ordinal da coluna Pedra**: mapeamento com ordem (ex.: Quartzo < Ágata < Ametista < Topázio), preservando noção de progresso.
-- **Cobertura de avaliações**: contagem de recomendações presentes (**Rec Av1..Rec Av4**) e uso de **Nº Av**.
+## Como executar localmente
 
-## Regra de não vazamento temporal
+Pré-requisitos:
+- Python 3.12+
+- `pip`
+- Docker (opcional)
 
-A previsão é sempre `t → t+1`.  
-Portanto, somente variáveis do ano `t` entram no modelo. Qualquer coluna do ano `t+1` é usada exclusivamente para gerar o alvo (**y**) e para avaliação, nunca como entrada do modelo.
+Instalação:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+```
+
+## Execução do pipeline
+
+1) Construir datasets processados:
+
+```bash
+python -m src.pipelines.build_dataset \
+  --raw-dir data/raw \
+  --interim-dir data/interim \
+  --processed-dir data/processed
+```
+
+2) Treinar baseline temporal:
+
+```bash
+python -m src.pipelines.train \
+  --processed-dir data/processed \
+  --artifacts-dir artifacts/models
+```
+
+3) Comparar modelos e gerar leaderboard:
+
+```bash
+python -m src.models.compare
+```
+
+4) Avaliar artefato em dataset:
+
+```bash
+python -m src.pipelines.evaluate \
+  --dataset-path data/processed/pair_2023_2024.parquet \
+  --model-path artifacts/models/latest_logreg.json \
+  --output-dir artifacts/evaluation
+```
+
+## API (FastAPI)
+
+Subir API:
+
+```bash
+uvicorn src.api.main:app --reload
+```
+
+Documentação:
+- Swagger UI: `http://127.0.0.1:8000/docs`
+- OpenAPI: `http://127.0.0.1:8000/openapi.json`
+
+Endpoints principais:
+- `GET /health` e `GET /infra/health`
+- `GET /smoke` e `GET /infra/smoke`
+- `GET /model`, `GET /predict/model`, `GET /infra/model`
+- `POST /predict`
+- `POST /predict/batch`
+- `POST /train`
+- `GET /leaderboard`
+
+Exemplo de inferência:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/predict" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_key": "logreg",
+    "features": {
+      "fase": 5,
+      "turma": "A",
+      "ian": 7.0,
+      "ida": 6.5,
+      "ieg": 6.8,
+      "ipp": 5.9,
+      "idade": 13
+    }
+  }'
+```
+
+## Docker
+
+Build:
+
+```bash
+docker build -t passos-magicos-api .
+```
+
+Run:
+
+```bash
+docker run --rm -p 8000:8000 passos-magicos-api
+```
+
+## Testes
+
+Executar suíte:
+
+```bash
+pytest -q
+```
+
+Cobertura:
+
+```bash
+pytest --cov=src --cov-report=term-missing
+```
+
+## CI/CD (GitHub Actions)
+
+Workflow implementado em:
+- `.github/workflows/ci-cd.yml`
+
+Fluxo:
+1. Executa testes e coverage em `push` e `pull_request` para `main`.
+2. Faz build da imagem Docker após testes passarem.
+3. Em `push` na `main`, dispara deploy no Render via Deploy Hook.
+
+Configuração necessária no GitHub (`Settings -> Secrets and variables -> Actions`):
+- `RENDER_DEPLOY_HOOK_URL`: URL do Deploy Hook do seu serviço no Render.
+
+## Rastreabilidade de artefatos
+
+- Modelos versionados por `run_id`.
+- Métricas salvas em JSON por execução.
+- Ponteiros `latest_*.json` para resolver modelo ativo por chave.
+- Leaderboard consolidado para comparação entre experimentos.
+
+## Critérios do Datathon e status
+
+- Pipeline completo de ML (pré-processamento -> treino -> avaliação -> inferência): atendido.
+- Serialização e carregamento de modelo para produção: atendido.
+- API de predição com contrato e validações: atendido.
+- Testes automatizados e cobertura mínima: atendido.
+- Containerização para execução isolada: atendido.
+- Documentação técnica de execução e uso: atendido.
+
+## O que ainda pode evoluir (não bloqueante)
+
+- Deploy gerenciado em nuvem (Cloud Run/Render/Heroku) com IaC.
+- Monitoramento contínuo em produção com agendamento e alertas de drift.
+
+## Resultado atual
+
+O projeto está tecnicamente consistente para entrega acadêmica e demonstra, de forma reprodutível, os componentes exigidos para um fluxo MLE de ponta a ponta no contexto do problema proposto.
