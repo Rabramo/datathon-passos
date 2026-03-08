@@ -1,0 +1,6 @@
+{
+  "run_id": "213447",
+  "model_name": "rf",
+  "model_path": "artifacts/models/model_rf_20260303_213447.joblib",
+  "metrics_path": null
+}

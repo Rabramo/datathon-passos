@@ -61,8 +61,13 @@ artifacts/*
 !artifacts/models/
 artifacts/models/*
 !artifacts/models/.gitkeep
-!artifacts/models/latest_logreg.json
+!artifacts/models/latest_*.json
+!artifacts/models/model_dummy_20260303_213445.joblib
 !artifacts/models/model_logreg_20260303_213446.joblib
+!artifacts/models/model_tree_20260303_213447.joblib
+!artifacts/models/model_rf_20260303_213447.joblib
+!artifacts/models/model_xgb_20260303_213456.joblib
+!artifacts/models/model_cat_20260303_213458.joblib
 # Local artifacts
 /data/interim/
 /notebooks/

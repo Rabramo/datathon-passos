@@ -1,0 +1,6 @@
+{
+  "run_id": "213456",
+  "model_name": "xgb",
+  "model_path": "artifacts/models/model_xgb_20260303_213456.joblib",
+  "metrics_path": null
+}
