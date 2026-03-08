@@ -1,4 +1,3 @@
-# src/data/preprocess.py
 from __future__ import annotations
 
 import argparse
@@ -11,16 +10,6 @@ from typing import Optional
 import pandas as pd
 
 
-# -----------------------------
-# Regras alinhadas ao README
-# -----------------------------
-
-# Excluir:
-# - Nome (redundante com RA)
-# - INDE* (derivado)
-# - Destaque_* (texto livre sem NLP)
-# - Avaliador1..Avaliador6 (alta cardinalidade/viés)
-# - Cg/Cf/Ct (rankings dependentes do conjunto)
 DROP_COLS_EXACT = {
     "nome",
     "cg",
@@ -35,7 +24,7 @@ DROP_AVALIADORES = {f"avaliador{i}" for i in range(1, 7)}
 
 REC_AV_COLS = ("rec_av1", "rec_av2", "rec_av3", "rec_av4")
 
-# Pedra ordinal (normalizada sem acento)
+
 PEDRA_ORD_MAP = {
     "quartzo": 0,
     "agata": 1,
@@ -48,12 +37,9 @@ PEDRA_ORD_MAP = {
 class PreprocessConfig:
     keep_ra: bool = True
     create_features: bool = True
-    out_format: str = "parquet"  # parquet|csv (csv só para debug)
+    out_format: str = "parquet"  
 
 
-# -----------------------------
-# Helpers
-# -----------------------------
 
 def _strip_accents(text: str) -> str:
     text = unicodedata.normalize("NFKD", text)
@@ -100,31 +86,27 @@ def _drop_cols_if_exist(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
     return df
 
 
-# -----------------------------
-# Normalizações de schema (anti-drift)
-# -----------------------------
+
 
 def _coalesce_columns(df: pd.DataFrame, target: str, candidates: list[str]) -> pd.DataFrame:
-    """
-    Consolida várias colunas candidatas em uma coluna target,
-    mantendo valores existentes e preenchendo com alternativas (fillna).
-    Remove candidatas após a consolidação.
-    """
+
     df = df.copy()
+
     if target not in df.columns:
-        df[target] = pd.NA
+        df[target] = pd.Series(pd.NA, index=df.index, dtype="object")
 
     for c in candidates:
         if c in df.columns and c != target:
-            df[target] = df[target].fillna(df[c])
+            # Avoid pandas fillna downcasting warning on object dtypes.
+            filled = df[target].where(df[target].notna(), df[c])
+            df[target] = filled.infer_objects(copy=False)
             df = df.drop(columns=[c])
+
     return df
 
 
 def _unify_pedra(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Garante que só exista 'pedra' (remove pedra_23, pedra_2023, etc).
-    """
+
     df = df.copy()
     pedra_variants = [c for c in df.columns if re.fullmatch(r"pedra_\d{2,4}", c)]
     if pedra_variants:
@@ -134,9 +116,7 @@ def _unify_pedra(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _drop_idade_sufixada(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Remove idade_22, idade_23, idade_2022 etc.
-    """
+
     df = df.copy()
     idade_cols = [c for c in df.columns if re.fullmatch(r"idade_\d{2,4}", c)]
     if idade_cols:
@@ -145,20 +125,13 @@ def _drop_idade_sufixada(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _derive_idade(df: pd.DataFrame, year: int) -> pd.DataFrame:
-    """
-    Idade deve ser derivada: idade = year - ano_nasc (quando possível).
-    Se existir 'idade' prévia, ela é sobrescrita pela derivada.
-    """
+
     df = df.copy()
     if "ano_nasc" in df.columns:
         ano_nasc = coerce_numeric(df["ano_nasc"])
         df["idade"] = year - ano_nasc
     return df
 
-
-# -----------------------------
-# Drop conforme README
-# -----------------------------
 
 def drop_baseline_columns(df: pd.DataFrame, keep_ra: bool = True) -> pd.DataFrame:
     df = df.copy()
@@ -178,16 +151,12 @@ def drop_baseline_columns(df: pd.DataFrame, keep_ra: bool = True) -> pd.DataFram
     return df.drop(columns=existing, errors="ignore")
 
 
-# -----------------------------
-# Feature engineering (interim)
-# -----------------------------
-
 def _pick_pedra_col(df: pd.DataFrame) -> Optional[str]:
-    # após _unify_pedra, deve preferir "pedra"
+
     if "pedra" in df.columns:
         return "pedra"
 
-    # fallback: tenta pedra_YY / pedra_YYYY; escolhe o maior sufixo
+
     pedra_year = [c for c in df.columns if re.fullmatch(r"pedra_\d{2,4}", c)]
     if pedra_year:
 
@@ -203,26 +172,25 @@ def _pick_pedra_col(df: pd.DataFrame) -> Optional[str]:
 def add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    # idade = year - ano_nasc já foi derivada em preprocess_year_df
-    # tenure = ano - ano_ingresso
+
     if "ano" in df.columns and "ano_ingresso" in df.columns:
         df["ano_ingresso"] = coerce_numeric(df["ano_ingresso"])
         df["tenure"] = coerce_numeric(df["ano"]) - df["ano_ingresso"]
 
-    # gap_fase = fase - fase_ideal
+
     if "fase" in df.columns and "fase_ideal" in df.columns:
         df["fase"] = coerce_numeric(df["fase"])
         df["fase_ideal"] = coerce_numeric(df["fase_ideal"])
         df["gap_fase"] = df["fase"] - df["fase_ideal"]
 
-    # pedra_ord
+
     pedra_col = _pick_pedra_col(df)
     if pedra_col:
         pedra_norm = clean_string(df[pedra_col]).str.lower()
         pedra_norm = pedra_norm.map(lambda x: _strip_accents(x) if isinstance(x, str) else x)
         df["pedra_ord"] = pedra_norm.map(PEDRA_ORD_MAP).astype("Float64")
 
-    # rec_av_count
+
     present_masks = []
     for c in REC_AV_COLS:
         if c in df.columns:
@@ -253,13 +221,13 @@ def coerce_common_types(df: pd.DataFrame) -> pd.DataFrame:
         "ingles",
         "ano_nasc",
         "ano_ingresso",
-        "idade",  # padronizado
+        "idade", 
         "tenure",
         "gap_fase",
         "pedra_ord",
     }
 
-    # também sufixos _YY/_YYYY (se existirem nos raw)
+
     for c in df.columns:
         if re.fullmatch(r"(iaa|ian|ida|ieg|ips|ipv|ipp|matem|portug|ingles)_\d{2,4}", c):
             numeric_like.add(c)
@@ -279,9 +247,6 @@ def coerce_common_types(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# -----------------------------
-# Pipeline por ano (raw -> interim)
-# -----------------------------
 
 def preprocess_year_df(df: pd.DataFrame, year: int, cfg: Optional[PreprocessConfig] = None) -> pd.DataFrame:
     cfg = cfg or PreprocessConfig()
@@ -289,51 +254,50 @@ def preprocess_year_df(df: pd.DataFrame, year: int, cfg: Optional[PreprocessConf
     df = normalize_columns(df)
     df["ano"] = int(year)
 
-    # Harmonização de schema entre anos (sinônimos)
+   
     rename_map = {
         "data_de_nasc": "ano_nasc",
         "defasagem": "defas",
         "mat": "matem",
         "por": "portug",
         "ing": "ingles",
-        "nome_anonimizado": "nome",  # cai na regra de drop
-        # Se algum ano veio com IPP em variação estranha, normalize aqui:
+        "nome_anonimizado": "nome", 
         "ip_p": "ipp",
     }
     df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
 
-    # Unifica pedra antes de qualquer coisa
+
     df = _unify_pedra(df)
 
-    # Remove idade_22/idade_23 etc. e deriva idade padrão
+  
     df = _drop_idade_sufixada(df)
     df = _derive_idade(df, year=year)
 
-    # Garantir schema: se ipp não existir no ano, cria coluna vazia
+  
     if "ipp" not in df.columns:
         df["ipp"] = pd.NA
 
-    # Drop por prefixos (captura variações tipo destaque_ipv_1, avaliador5, inde_23 etc.)
+
     drop_prefixes_extra = ("destaque_", "avaliador", "inde")
     to_drop = [c for c in df.columns if c.startswith(drop_prefixes_extra)]
     if to_drop:
         df = df.drop(columns=to_drop, errors="ignore")
 
-    # Drop baseline conforme README
+
     df = drop_baseline_columns(df, keep_ra=cfg.keep_ra)
 
-    # Tipos e limpeza simples
+
     df = coerce_common_types(df)
 
-    # Features derivadas
     if cfg.create_features:
         df = add_engineered_features(df)
 
-    # Garantir schema no final (depois de drops e renomes)
+  
     if "ipp" not in df.columns:
         df["ipp"] = pd.NA
 
     return df
+
 
 def _save_df(df: pd.DataFrame, out_path: Path) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)

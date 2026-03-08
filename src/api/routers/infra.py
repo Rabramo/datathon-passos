@@ -1,66 +1,41 @@
 #src/api/routers/infra.py
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from src.api.model_loader import load_model as load_loaded_model, resolve_model_key
 
-router = APIRouter(tags=["infra"])
-
-MODEL_KEY_MAP = {
-    "default": "default",
-    "tree": "tree",
-    "logreg": "logreg",
-}
+router = APIRouter(prefix="/infra", tags=["Infra"])
 
 
-def _normalizar_model_key(model_key: Optional[str]) -> Optional[str]:
-    if model_key is None:
-        return None
-    return MODEL_KEY_MAP.get(model_key, model_key)
-
-
-def _extrair_features_esperadas(model: Any, meta: dict) -> list[str]:
+def _extract_expected_features(model: Any, meta: dict[str, Any]) -> list[str]:
     for key in ("raw_features", "feature_columns", "input_features"):
         cols = meta.get(key)
-        if isinstance(cols, list) and all(isinstance(c, str) for c in cols):
+        if isinstance(cols, list) and all(isinstance(col, str) for col in cols):
             return cols
 
     cols = getattr(model, "feature_names_in_", None)
     if cols is not None:
-        return [str(c) for c in list(cols)]
+        return [str(col) for col in list(cols)]
 
     return []
 
 
-@router.get(
-    "/infra/health",
-    summary="Liveness probe",
-    description="Endpoint simples de liveness probe.",
-)
-def health() -> Dict[str, str]:
-    return {"status": "ok"}
-
-
-@router.get(
-    "/infra/model",
-    summary="Exibe metadados do modelo carregado",
-)
-def get_model_info(
-    request: Request,
-    model_key: Optional[str] = Query(default=None),
-) -> Dict[str, Any]:
-    internal_key = _normalizar_model_key(model_key)
-    resolved_key = resolve_model_key(internal_key)
-
+def _get_model_cache(request: Request) -> dict[str, Any]:
     cache = getattr(request.app.state, "models_by_key", None)
     if cache is None:
         cache = {}
         request.app.state.models_by_key = cache
+    return cache
+
+
+def _load_model_with_cache(request: Request, model_key: str | None) -> tuple[str, Any]:
+    cache = _get_model_cache(request)
 
     try:
+        resolved_key = resolve_model_key(model_key)
         if resolved_key in cache:
             loaded = cache[resolved_key]
         else:
@@ -71,9 +46,13 @@ def get_model_info(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    return resolved_key, loaded
+
+
+def _build_model_payload(resolved_key: str, loaded: Any, api: str | None = None, dry_run: bool | None = None) -> dict[str, Any]:
     model = loaded.model
     meta = loaded.meta if isinstance(loaded.meta, dict) else {}
-    features_esperadas = _extrair_features_esperadas(model, meta)
+    expected_features = _extract_expected_features(model, meta)
 
     threshold = meta.get("threshold", 0.5)
     try:
@@ -81,30 +60,64 @@ def get_model_info(
     except Exception:
         threshold = 0.5
 
-    return {
+    payload: dict[str, Any] = {
         "status": "ok",
         "model_key": resolved_key,
         "model_path": str(meta.get("model_path", "unknown")),
         "threshold": threshold,
-        "n_features_esperadas": len(features_esperadas),
-        "features_esperadas": features_esperadas,
+        "n_features_esperadas": len(expected_features),
+        "features_esperadas": expected_features,
         "meta_keys": sorted(list(meta.keys())),
     }
 
+    if api is not None:
+        payload["api"] = api
+        payload["model_ok"] = True
+
+    if dry_run is not None:
+        payload["dry_run"] = {"executado": dry_run, "estrategia": "zeros"}
+
+    return payload
+
 
 @router.get(
-    "/infra/smoke",
+    "/health",
+    tags=["Infra"],
+    summary="Liveness probe",
+    description="Endpoint simples de liveness probe.",
+)
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@router.get(
+    "/model",
+    tags=["Infra"],
+    summary="Exibe metadados do modelo carregado",
+)
+def get_model_info(
+    request: Request,
+    model_key: str | None = Query(default=None),
+) -> dict[str, Any]:
+    resolved_key, loaded = _load_model_with_cache(request, model_key)
+    return _build_model_payload(resolved_key=resolved_key, loaded=loaded)
+
+
+@router.get(
+    "/smoke",
+    tags=["Infra"],
     summary="Executa verificação rápida da API e do modelo",
 )
 def smoke(
     request: Request,
-    model_key: Optional[str] = Query(default=None),
+    model_key: str | None = Query(default=None),
     dry_run: bool = Query(default=False),
-) -> Dict[str, Any]:
-    internal_key = _normalizar_model_key(model_key)
-    resolved_key = resolve_model_key(internal_key)
-
+) -> dict[str, Any]:
     if dry_run:
+        try:
+            resolved_key = resolve_model_key(model_key)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {
             "status": "ok",
             "api": "up",
@@ -115,47 +128,16 @@ def smoke(
             "n_features_esperadas": 0,
             "features_esperadas": [],
             "meta_keys": [],
-            "dry_run": {"executado": True},
+            "dry_run": {"executado": True, "estrategia": "zeros"},
         }
 
-    cache = getattr(request.app.state, "models_by_key", None)
-    if cache is None:
-        cache = {}
-        request.app.state.models_by_key = cache
-
-    try:
-        if resolved_key in cache:
-            loaded = cache[resolved_key]
-        else:
-            loaded = load_loaded_model(model_key=resolved_key, return_meta=True)
-            cache[resolved_key] = loaded
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    model = loaded.model
-    meta = loaded.meta if isinstance(loaded.meta, dict) else {}
-    features_esperadas = _extrair_features_esperadas(model, meta)
-
-    threshold = meta.get("threshold", 0.5)
-    try:
-        threshold = float(threshold)
-    except Exception:
-        threshold = 0.5
-
-    return {
-        "status": "ok",
-        "api": "up",
-        "model_ok": True,
-        "model_key": resolved_key,
-        "model_path": str(meta.get("model_path", "unknown")),
-        "threshold": threshold,
-        "n_features_esperadas": len(features_esperadas),
-        "features_esperadas": features_esperadas,
-        "meta_keys": sorted(list(meta.keys())),
-        "dry_run": {"executado": False},
-    }
+    resolved_key, loaded = _load_model_with_cache(request, model_key)
+    return _build_model_payload(
+        resolved_key=resolved_key,
+        loaded=loaded,
+        api="up",
+        dry_run=False,
+    )
 
 
 __all__ = [
