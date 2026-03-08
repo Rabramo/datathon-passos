@@ -6,7 +6,7 @@ No cenário do projeto, a principal necessidade é identificar com antecedência
 
 Para isso, a solução estima o risco de defasagem escolar no ano `t+1` (`y=1`) usando apenas variáveis disponíveis no ano `t`, respeitando a lógica temporal e evitando vazamento de informação futura. O repositório implementa o ciclo ponta a ponta do problema: preparação de dados, treino temporal, avaliação, API de inferência, testes automatizados, deploy e monitoramento contínuo.
 
-## Acesso rápido (Render - produção)
+## Acesso rápido em produção (Render)
 
 API em produção:
 - `https://datathon-passos-api-ra363736.onrender.com`
@@ -22,6 +22,36 @@ Healthcheck:
 
 Observação:
 - A rota raiz `/` retorna um payload simples com links úteis da API.
+
+### Opções disponíveis no Swagger (GET e POST)
+
+GET:
+- `GET /`:
+  payload inicial com links úteis da API.
+- `GET /health`:
+  liveness básico da aplicação.
+- `GET /infra/health`:
+  healthcheck da camada de infraestrutura.
+- `GET /infra/model`:
+  metadados do modelo carregado (threshold, features esperadas e caminho do artefato).
+- `GET /infra/smoke`:
+  verificação rápida da API + modelo, com opção `dry_run`.
+- `GET /predict/model`:
+  inspeção de metadados do modelo selecionado para inferência.
+- `GET /predict/feature-descriptions`:
+  dicionário de features com descrição e indicação de variável derivada.
+- `GET /leaderboard`:
+  consulta do ranking de modelos (JSON ou CSV), com ordenação e filtros.
+
+POST:
+- `POST /predict`:
+  inferência individual de risco de defasagem (`model_key` via query param).
+- `POST /predict/batch`:
+  inferência em lote.
+- `POST /predict/features/select`:
+  seleção de subconjunto de features aceitas na inferência.
+- `POST /train`:
+  disparo de treinamento temporal com escolha de modelo e conjunto de variáveis.
 
 ## Uso com Docker (recomendado)
 
@@ -174,7 +204,7 @@ Endpoints principais:
 - `GET /`
 - `GET /health` e `GET /infra/health`
 - `GET /smoke` e `GET /infra/smoke`
-- `GET /model`, `GET /predict/model`, `GET /infra/model`
+- `GET /model`, `GET /predict/model`, `GET /predict/feature-descriptions`, `GET /infra/model`
 - `POST /predict`
 - `POST /predict/batch`
 - `POST /train`
@@ -205,6 +235,7 @@ curl -sS https://datathon-passos-api-ra363736.onrender.com/
 curl -sS https://datathon-passos-api-ra363736.onrender.com/health
 curl -sS https://datathon-passos-api-ra363736.onrender.com/docs > /dev/null
 curl -sS https://datathon-passos-api-ra363736.onrender.com/openapi.json > /dev/null
+curl -sS https://datathon-passos-api-ra363736.onrender.com/predict/feature-descriptions
 ```
 
 Exemplo de predição em produção:

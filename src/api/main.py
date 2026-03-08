@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Body, FastAPI, Query, Request, Response
 
+from src.api.feature_descriptions import router as feature_descriptions_router
 from src.api.routers.infra import (
     get_model_info,
     router as infra_router,
@@ -41,6 +42,7 @@ app.include_router(infra_router)
 app.include_router(leaderboard_router)
 app.include_router(train_router)
 app.include_router(predict_router)
+app.include_router(feature_descriptions_router, prefix="/predict")
 
 
 # -------------------------------------------------------------------
