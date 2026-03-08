@@ -61,6 +61,7 @@ app.openapi = _custom_openapi
     "/smoke",
     tags=["Compat"],
     summary="Executa verificação rápida da API e do modelo",
+    include_in_schema=False,
 )
 def smoke_legacy(
     request: Request,
