@@ -47,7 +47,7 @@ MODEL_KEY_ALIASES = {
 }
 
 LATEST_POINTERS = {
-    "default": "latest_logreg.json",
+    "default": "latest_tree.json",
     "dummy": "latest_dummy.json",
     "logreg": "latest_logreg.json",
     "tree": "latest_tree.json",

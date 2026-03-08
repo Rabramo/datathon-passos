@@ -6,6 +6,18 @@ No cenário do projeto, a principal necessidade é identificar com antecedência
 
 Para isso, a solução estima o risco de defasagem escolar no ano `t+1` (`y=1`) usando apenas variáveis disponíveis no ano `t`, respeitando a lógica temporal e evitando vazamento de informação futura. O repositório implementa o ciclo ponta a ponta do problema: preparação de dados, treino temporal, avaliação, API de inferência, testes automatizados, deploy e monitoramento contínuo.
 
+Neste contexto de negócio, o modelo recomendado para uso operacional é o **Decision Tree**, por apresentar melhor **recall** no cenário avaliado. Para a necessidade da Passos Mágicos, é mais adequado priorizar a identificação do maior número possível de alunos potencialmente em risco, reduzindo a chance de deixar sem acompanhamento casos que precisariam de intervenção pedagógica antecipada.
+
+Por esse motivo, o **modelo default da API no endpoint de predição (`POST /predict`) é o Decision Tree** quando `model_key` não é informado.
+
+A API também permite selecionar explicitamente outros modelos via `model_key`:
+- `dummy`
+- `logreg`
+- `tree`
+- `rf`
+- `xgb`
+- `cat`
+
 **API desenvolvida para o Datathon 2026/MLOps - Pós Tech FIAP Machine Learning Engineering**
 
 **Aluno: Rogerio Abramo A. Pretti | RA 363736 | Grupo 150 | 5MLET**
