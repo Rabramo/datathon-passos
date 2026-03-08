@@ -135,6 +135,41 @@ curl -X POST "http://127.0.0.1:8000/predict" \
   }'
 ```
 
+## Deploy no Render (produção)
+
+URL pública da API em produção:
+- `https://datathon-passos-api-ra363736.onrender.com`
+
+Observação:
+- A rota raiz `/` retorna `404` por padrão. Use `/health`, `/docs` ou `/openapi.json`.
+
+Validações rápidas em produção:
+
+```bash
+curl -sS https://datathon-passos-api-ra363736.onrender.com/health
+curl -sS https://datathon-passos-api-ra363736.onrender.com/docs > /dev/null
+curl -sS https://datathon-passos-api-ra363736.onrender.com/openapi.json > /dev/null
+```
+
+Exemplo de predição em produção:
+
+```bash
+curl -X POST "https://datathon-passos-api-ra363736.onrender.com/predict" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_key": "logreg",
+    "features": {
+      "fase": 5,
+      "turma": "A",
+      "ian": 7.0,
+      "ida": 6.5,
+      "ieg": 6.8,
+      "ipp": 5.9,
+      "idade": 13
+    }
+  }'
+```
+
 ## Docker
 
 Build:
