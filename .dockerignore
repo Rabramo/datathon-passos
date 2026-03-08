@@ -47,3 +47,4 @@ artifacts/models/*.joblib
 artifacts/models/metrics_*.json
 artifacts/models/leaderboard.csv
 !artifacts/models/latest*.json
+!artifacts/models/model_*.joblib
