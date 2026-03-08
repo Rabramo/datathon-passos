@@ -200,6 +200,46 @@ Cobertura:
 pytest --cov=src --cov-report=term-missing
 ```
 
+Cobertura atual (última execução local):
+
+```text
+-------- coverage: platform darwin, python 3.12.12-final-0 ----------
+Name                               Stmts   Miss  Cover   Missing
+----------------------------------------------------------------
+src/__init__.py                        0      0   100%
+src/api/__init__.py                    0      0   100%
+src/api/app.py                        45      4    91%   76-77, 92-93
+src/api/feature_descriptions.py       13      4    69%   154-164
+src/api/leaderboard.py                45     31    31%   33-48, 66-101
+src/api/main.py                       36      4    89%   56, 104, 119, 138
+src/api/model_loader.py               81     13    84%   103, 106, 110, 114, 124, 134, 143-144, 157-160, 173
+src/api/predict.py                     3      3     0%   1-5
+src/api/routers/__init__.py            0      0   100%
+src/api/routers/infra.py              67      5    93%   23, 29-30, 119-120
+src/api/routers/leaderboard.py        45     31    31%   37-56, 91-137
+src/api/routers/predict.py           168     72    57%   80, 166-167, 172-185, 218-222, 244-259, 330-331, 335, 346, 362, 365, 372-373, 415-476
+src/api/routers/train.py              42      5    88%   27, 32, 54-55, 88
+src/api/schemas.py                    95      1    99%   22
+src/data/__init__.py                   0      0   100%
+src/data/build_pairs.py               42      1    98%   42
+src/data/load.py                      40      0   100%
+src/data/load_processed_pairs.py      24      0   100%
+src/data/preprocess.py               186     17    91%   123, 145, 163-167, 177-178, 182-184, 197-198, 200, 233, 297, 353
+src/data/validate.py                  38      0   100%
+src/features/__init__.py               0      0   100%
+src/features/build_pairs.py           42      3    93%   41, 44, 65
+src/features/preprocess.py            76      0   100%
+src/models/evaluate.py                52      6    88%   35-38, 66, 82-83
+src/models/train.py                   74      9    88%   26, 41, 55, 57, 80, 83, 96, 116, 121
+src/models/train_api.py               88     13    85%   41, 45-49, 52-56, 68, 129
+src/pipelines/build_dataset.py        69     15    78%   71, 94, 96, 98, 111-118, 122-123, 134
+src/pipelines/evaluate.py            167     32    81%   50, 60, 87, 94, 98, 109, 119, 140, 143, 155, 172, 186, 193, 196-200, 225-226, 334-373, 377-393, 397
+src/pipelines/train.py               128     20    84%   172-176, 184, 189-193, 235-240, 244-245, 254
+src/utils/io.py                        4      0   100%
+----------------------------------------------------------------
+TOTAL                               1670    289    83%
+```
+
 ## CI/CD (GitHub Actions)
 
 Workflow implementado em:
@@ -212,6 +252,21 @@ Fluxo:
 
 Configuração necessária no GitHub (`Settings -> Secrets and variables -> Actions`):
 - `RENDER_DEPLOY_HOOK_URL`: URL do Deploy Hook do seu serviço no Render.
+
+## Monitoramento contínuo de drift
+
+Workflow implementado em:
+- `.github/workflows/drift-monitoring.yml`
+
+Funcionamento:
+1. Execução agendada diariamente (cron) e também manual (`workflow_dispatch`).
+2. Cálculo de drift por feature com PSI em `src/monitoring/drift.py`.
+3. Geração de relatórios em `artifacts/monitoring` (JSON + CSV).
+4. Upload do relatório como artifact do GitHub Actions.
+5. Alerta externo via webhook quando há drift crítico.
+
+Secret opcional para alerta:
+- `DRIFT_ALERT_WEBHOOK_URL`: webhook (Slack/Discord/Teams) para alertas.
 
 ## Rastreabilidade de artefatos
 
@@ -232,7 +287,7 @@ Configuração necessária no GitHub (`Settings -> Secrets and variables -> Acti
 ## O que ainda pode evoluir (não bloqueante)
 
 - Deploy gerenciado em nuvem (Cloud Run/Render/Heroku) com IaC.
-- Monitoramento contínuo em produção com agendamento e alertas de drift.
+- Evoluir fonte de monitoramento para dados online de produção (eventos reais de inferência).
 
 ## Resultado atual
 
