@@ -58,7 +58,11 @@ data/processed/*
 
 artifacts/*
 !artifacts/.gitkeep
+!artifacts/models/
+artifacts/models/*
 !artifacts/models/.gitkeep
+!artifacts/models/latest_logreg.json
+!artifacts/models/model_logreg_20260303_213446.joblib
 # Local artifacts
 /data/interim/
 /notebooks/

@@ -1,0 +1,6 @@
+{
+  "run_id": "213446",
+  "model_name": "logreg",
+  "model_path": "artifacts/models/model_logreg_20260303_213446.joblib",
+  "metrics_path": null
+}
