@@ -20,7 +20,7 @@ def test_openapi_has_health_and_docs():
     spec = r.json()
     assert "paths" in spec
     assert "/health" in spec["paths"]
-    assert "/docs" in spec["paths"]
+    assert "/docs" not in spec["paths"]
 
 
 def test_smoke_default_contract():

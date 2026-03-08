@@ -34,22 +34,6 @@ def _custom_openapi() -> dict:
         routes=app.routes,
     )
 
-    paths = schema.setdefault("paths", {})
-    paths.setdefault(
-        "/docs",
-        {
-            "get": {
-                "summary": "Swagger UI",
-                "description": "Documentação interativa da API.",
-                "responses": {
-                    "200": {
-                        "description": "Swagger UI disponível.",
-                    }
-                },
-            }
-        },
-    )
-
     app.openapi_schema = schema
     return app.openapi_schema
 

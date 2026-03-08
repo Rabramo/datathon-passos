@@ -39,7 +39,8 @@ def test_openapi_reutiliza_schema_em_cache():
     schema_2 = app.openapi()
 
     assert schema_1 is schema_2
-    assert "/docs" in schema_2["paths"]
+    assert "/health" in schema_2["paths"]
+    assert "/docs" not in schema_2["paths"]
 
 def test_smoke_com_meta_none_retorna_threshold_default():
     client = TestClient(app)

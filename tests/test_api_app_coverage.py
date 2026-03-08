@@ -74,9 +74,9 @@ def test_openapi_json_is_generated_and_has_paths(client_with_dummy_loader):
     assert r.status_code == 200
     spec = r.json()
     assert "paths" in spec
-    # pelo menos health/docs devem existir
+    # health deve existir e /docs não deve ser injetado no schema
     assert "/health" in spec["paths"]
-    assert "/docs" in spec["paths"]
+    assert "/docs" not in spec["paths"]
 
 
 def test_smoke_dry_run_uses_fallback_strings(client_with_dummy_loader):
