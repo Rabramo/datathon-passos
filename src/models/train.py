@@ -1,4 +1,3 @@
-# src/models/train.py
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,14 +13,11 @@ from sklearn.preprocessing import OneHotEncoder
 
 @dataclass(frozen=True)
 class TrainSpec:
-    # colunas normalizadas
     id_col: str = "ra"
     target_col: str = "y"
-    # colunas operacionais do dataset temporal (não são features)
     drop_cols: tuple[str, ...] = ("year_t", "year_t1", "ano")
     random_state: int = 42
     max_iter: int = 2000
-    # solver explícito para estabilidade. liblinear é bom para binário.
     solver: str = "liblinear"
 
 
@@ -40,10 +36,6 @@ def split_xy(df: pd.DataFrame, spec: TrainSpec) -> tuple[pd.DataFrame, pd.Series
 
 
 def _drop_all_nan_columns(X: pd.DataFrame) -> pd.DataFrame:
-    """
-    Remove colunas 100% NaN. Isso evita warnings do sklearn e comportamentos
-    implícitos (p.ex. SimpleImputer ignorando features sem valores observados).
-    """
     all_nan_cols = [c for c in X.columns if X[c].isna().all()]
     if all_nan_cols:
         X = X.drop(columns=all_nan_cols)
@@ -51,13 +43,6 @@ def _drop_all_nan_columns(X: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
-    """
-    Separa colunas em numéricas e categóricas (inclui dtype 'string').
-
-    Ajuste importante:
-    - Remove colunas numéricas que são 100% NaN no treino, para evitar warnings do SimpleImputer
-      e garantir pipeline estável (ex.: 'ipp' no seu caso).
-    """
     cat_cols: list[str] = []
     bool_cols: list[str] = []
     num_cols: list[str] = []
@@ -73,11 +58,7 @@ def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
         else:
             num_cols.append(c)
 
-    # trata bool como categórica (one-hot)
     cat_cols = cat_cols + bool_cols
-
-    # remove numéricas 100% NaN no dataset de treino
-    # (evita: "Skipping features without any observed values")
     num_cols = [c for c in num_cols if X[c].notna().any()]
 
     numeric = Pipeline(
@@ -98,6 +79,9 @@ def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
     if cat_cols:
         transformers.append(("cat", categorical, cat_cols))
 
+    if not transformers:
+        raise ValueError("No valid feature columns available after preprocessing.")
+
     return ColumnTransformer(
         transformers=transformers,
         remainder="drop",
@@ -106,9 +90,10 @@ def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
 
 def train_model(df_train: pd.DataFrame, spec: TrainSpec) -> Pipeline:
     X_train, y_train = split_xy(df_train, spec)
-
-    # robustez: remove features 100% nulas no treino
     X_train = _drop_all_nan_columns(X_train)
+
+    if X_train.empty:
+        raise ValueError("Training dataframe has no usable feature columns.")
 
     pre = build_preprocessor(X_train)
 
@@ -127,12 +112,11 @@ def train_model(df_train: pd.DataFrame, spec: TrainSpec) -> Pipeline:
 def predict_proba_positive(model: Pipeline, df: pd.DataFrame, spec: TrainSpec) -> np.ndarray:
     X, _ = split_xy(df, spec)
 
-    # Obs: o alinhamento de colunas do X para bater com treino deve ocorrer no pipeline (src/pipelines/train.py)
     if not hasattr(model, "predict_proba"):
-        raise TypeError("O modelo/pipeline não expõe predict_proba().")
+        raise TypeError("The model/pipeline does not expose predict_proba().")
 
     proba = model.predict_proba(X)
 
     if proba.ndim != 2 or proba.shape[1] != 2:
-        raise ValueError(f"predict_proba retornou shape inesperado: {proba.shape}")
+        raise ValueError(f"predict_proba returned an unexpected shape: {proba.shape}")
     return proba[:, 1]

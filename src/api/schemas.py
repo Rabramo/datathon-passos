@@ -1,7 +1,49 @@
 # src/api/schemas.py
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional, Literal
 from pydantic import BaseModel, Field, ConfigDict
+
+# Shared enums (single source of truth for Swagger)
+ModelKey = Literal[
+    "Dummy",
+    "Logistic Regression",
+    "Decision Tree",
+    "CatBoost",
+    "Random Forest",
+    "XGBoost",
+]
+
+FeatureName = Literal[
+    "fase","turma","ano_nasc","genero","ano_ingresso","instituicao_de_ensino","no_av",
+    "rec_av1","rec_av2","rec_av3","rec_av4","iaa","ieg","ips","rec_psicologia","ida",
+    "matem","portug","ingles","indicado","atingiu_pv","ipv","ian","fase_ideal","defas",
+    "pedra","idade","ipp","tenure","gap_fase","pedra_ord","rec_av_count"
+]
+
+FeatureSetName = Literal["all", "selected", "custom"]
+
+class TrainRequest(BaseModel):
+    model_key: ModelKey = Field(..., description="Modelo a treinar (dropdown).")
+    feature_set: FeatureSetName = Field(
+        default="all",
+        description="all=todas, selected=selecionadas via /features/select, custom=usa variables.",
+    )
+    variables: Optional[List[FeatureName]] = Field(
+        default=None,
+        description="Se informado, sobrescreve feature_set e usa exatamente essas variáveis (multi-select).",
+    )
+    threshold: float = Field(default=0.5, ge=0.0, le=1.0, description="Threshold para métricas de classe.")
+    random_seed: int = Field(default=42, description="Seed para reprodutibilidade.")
+
+class TrainResponse(BaseModel):
+    status: str = "ok"
+    run_id: str
+    model_key: ModelKey
+    internal_model_key: str
+    n_features: int
+    features_used: List[str]
+    metrics: Dict[str, Any]
+    artifacts: Dict[str, str]
 
 class FeatureSelectionRequest(BaseModel):
     name: Optional[str] = Field(
