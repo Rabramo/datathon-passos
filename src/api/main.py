@@ -49,7 +49,7 @@ app.include_router(predict_router)
 
 @app.get(
     "/health",
-    tags=["Compat"],
+    tags=["Infra"],
     summary="Verifica se a API está viva",
 )
 def health_legacy(request: Request) -> dict[str, Any]:

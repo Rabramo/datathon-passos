@@ -33,9 +33,7 @@ OutputFormat = Literal["json", "csv"]
 
 
 def _carregar_leaderboard() -> pd.DataFrame:
-    """
-    Carrega o arquivo de leaderboard a partir de artifacts/leaderboard/leaderboard.csv.
-    """
+
     if not LEADERBOARD_PATH.exists():
         raise HTTPException(
             status_code=404,

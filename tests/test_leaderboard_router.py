@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.api.routers.leaderboard import router
+from src.api.leaderboard import router
 
 
 def create_app() -> FastAPI:
