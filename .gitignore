@@ -55,9 +55,14 @@ data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+!data/processed/pair_2022_2023.parquet
+!data/processed/pair_2023_2024.parquet
 
 artifacts/*
 !artifacts/.gitkeep
+!artifacts/leaderboard/
+artifacts/leaderboard/*
+!artifacts/leaderboard/leaderboard.csv
 !artifacts/models/
 artifacts/models/*
 !artifacts/models/.gitkeep

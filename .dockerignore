@@ -42,6 +42,10 @@ build/
 data/raw/
 data/processed/
 data/interim/
+!data/processed/
+data/processed/*
+!data/processed/pair_2022_2023.parquet
+!data/processed/pair_2023_2024.parquet
 
 artifacts/models/*.joblib
 artifacts/models/metrics_*.json
