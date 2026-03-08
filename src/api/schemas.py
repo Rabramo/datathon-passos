@@ -125,7 +125,6 @@ class FeatureSelectionResponse(BaseModel):
 
 
 class PredictRequest(BaseModel):
-    model_key: ModelKey | None = None
     features: dict[str, Any] | None = Field(default=None)
 
     model_config = ConfigDict(
@@ -135,7 +134,6 @@ class PredictRequest(BaseModel):
                 {
                     "summary": "Formato aninhado",
                     "value": {
-                        "model_key": "Logistic Regression",
                         "features": {
                             "ra": "123",
                             "genero": "F",
@@ -148,7 +146,6 @@ class PredictRequest(BaseModel):
                 {
                     "summary": "Formato flat",
                     "value": {
-                        "model_key": "Logistic Regression",
                         "ra": "123",
                         "genero": "F",
                         "fase": 5,
@@ -159,11 +156,6 @@ class PredictRequest(BaseModel):
             ]
         },
     )
-
-    @field_validator("model_key", mode="before")
-    @classmethod
-    def _normalize_model_key(cls, value: Any) -> Any:
-        return _normalize_model_key_value(value)
 
 
 class PredictResponse(BaseModel):

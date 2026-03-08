@@ -84,6 +84,8 @@ def _extrair_features(payload: PredictRequest) -> Dict[str, Any]:
         return dict(payload.features)
 
     data = payload.model_dump(exclude={"features"})
+    # model_key é aceito apenas via query param; ignora no body por compatibilidade.
+    data.pop("model_key", None)
     return dict(data)
 
 
