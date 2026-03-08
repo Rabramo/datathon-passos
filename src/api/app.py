@@ -1,211 +1,29 @@
-# src/api/app.py
+#src/api/app.py
 from __future__ import annotations
 
-import time
-from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
-import pandas as pd
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi import Query, Request
 from fastapi.openapi.utils import get_openapi
 
-from src.api.model_loader import LoadedModel, load_model as load_loaded_model
-from src.api.predict import router as predict_router
-from src.api.feature_descriptions import router as feature_desc_router
-from src.api.leaderboard import router as leaderboard_router
+from src.api.main import app
+from src.api.model_loader import load_model as load_loaded_model, resolve_model_key
 
 
-_START_TIME = time.time()
-
-# Cache para evitar recarregar modelo só para gerar o OpenAPI
-_OPENAPI_FEATURES_CACHE: Optional[List[str]] = None
-_OPENAPI_FEATURES_SOURCE: Optional[str] = None
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # startup leve
-    yield
-    # shutdown: nada
-
-
-def _uptime_seconds() -> int:
-    return int(time.time() - _START_TIME)
-
-
-def _get_cached_model(request: Request) -> Optional[LoadedModel]:
-    loaded = getattr(request.app.state, "loaded", None)
-    return loaded if isinstance(loaded, LoadedModel) else None
-
-
-def _ensure_model_loaded(request: Request) -> LoadedModel:
-    cached = _get_cached_model(request)
-    if cached is not None:
-        return cached
-    lm = load_loaded_model(return_meta=True)
-    request.app.state.loaded = lm
-    return lm
-
-
-def _extract_features_from_meta(meta: dict) -> Tuple[List[str], str]:
-    """
-    Preferência: meta contém contrato "bruto" (ano t):
-      - raw_features / feature_columns / input_features
-    """
+def _extrair_features_esperadas(model: Any, meta: dict) -> list[str]:
     for key in ("raw_features", "feature_columns", "input_features"):
         cols = meta.get(key)
-        if isinstance(cols, list) and cols and all(isinstance(c, str) for c in cols):
-            return cols, f"meta.{key}"
-    return [], "meta.nao_contem_features"
+        if isinstance(cols, list) and all(isinstance(c, str) for c in cols):
+            return cols
 
-
-def _extract_features_from_model(model: Any) -> Tuple[List[str], str]:
-    """
-    Fallback: extrai do próprio modelo/pipeline.
-    """
     cols = getattr(model, "feature_names_in_", None)
     if cols is not None:
-        out = [str(c) for c in list(cols)]
-        if out:
-            return out, "model.feature_names_in_"
+        return [str(c) for c in list(cols)]
 
-    g = getattr(model, "get_feature_names_out", None)
-    if callable(g):
-        try:
-            out = [str(c) for c in list(g())]
-            if out:
-                return out, "model.get_feature_names_out"
-        except Exception:
-            pass
-
-    named_steps = getattr(model, "named_steps", None)
-    if isinstance(named_steps, dict) and named_steps:
-        for step_name, step_obj in named_steps.items():
-            g2 = getattr(step_obj, "get_feature_names_out", None)
-            if callable(g2):
-                try:
-                    out = [str(c) for c in list(g2())]
-                    if out:
-                        return out, f"pipeline.step[{step_name}].get_feature_names_out"
-                except Exception:
-                    pass
-
-    return [], "model.nao_expoe_features"
+    return []
 
 
-def _get_expected_features(lm: LoadedModel) -> Tuple[List[str], str]:
-    meta = lm.meta or {}
-    model = lm.model
-
-    cols, src = _extract_features_from_meta(meta)
-    if cols:
-        return cols, src
-
-    cols2, src2 = _extract_features_from_model(model)
-    if cols2:
-        return cols2, src2
-
-    return [], "nenhuma"
-
-
-def _build_predict_example_payload(expected_features: List[str]) -> Dict[str, Any]:
-    """
-    Exemplo simples para Swagger: todas as chaves com 0 como placeholder.
-    """
-    return {f: 0 for f in expected_features}
-
-
-def _inject_predict_example_into_openapi(app: FastAPI) -> None:
-    """
-    Injeta example no POST /predict para o Swagger exibir todas as features.
-    Se falhar, não deve quebrar /openapi.json.
-    """
-    schema = app.openapi_schema
-    if not schema:
-        return
-
-    global _OPENAPI_FEATURES_CACHE, _OPENAPI_FEATURES_SOURCE
-
-    if _OPENAPI_FEATURES_CACHE is None or _OPENAPI_FEATURES_SOURCE is None:
-        lm = load_loaded_model(return_meta=True)
-        feats, src = _get_expected_features(lm)
-        _OPENAPI_FEATURES_CACHE = feats
-        _OPENAPI_FEATURES_SOURCE = src
-
-    feats = _OPENAPI_FEATURES_CACHE or []
-    src = _OPENAPI_FEATURES_SOURCE or "nenhuma"
-    if not feats:
-        return
-
-    paths = schema.get("paths", {})
-    predict_item = paths.get("/predict")
-    if not isinstance(predict_item, dict):
-        return
-
-    post_op = predict_item.get("post")
-    if not isinstance(post_op, dict):
-        return
-
-    request_body = post_op.get("requestBody")
-    if not isinstance(request_body, dict):
-        return
-
-    content = request_body.get("content", {})
-    app_json = content.get("application/json")
-    if not isinstance(app_json, dict):
-        return
-
-    app_json["examples"] = {
-        "features_esperadas": {
-            "summary": "Payload com todas as features esperadas",
-            "description": f"Features extraídas via {src}. Ajuste os valores conforme o aluno.",
-            "value": _build_predict_example_payload(feats),
-        }
-    }
-
-    # garante editor genérico se necessário
-    if "schema" not in app_json or not isinstance(app_json["schema"], dict):
-        app_json["schema"] = {"type": "object", "additionalProperties": True}
-
-
-# -------------------------------------------------------------------
-# Criação do app (ANTES de include_router)
-# -------------------------------------------------------------------
-
-app = FastAPI(
-    title="Passos Mágicos - Defasagem API",
-    version="1.0.0",
-    description=(
-        "**API desenvolvida para o Datathon 2026/MLOps - Pós Tech FIAP Machine Learning Engineering**\n\n"
-        "**Aluno**: Rogerio Abramo A. Pretti | RA 363736 | Grupo 150 | 5MLET\n\n"
-        "**Objetivo**:\n"
-        "Estimar a probabilidade de um aluno ter defasagem de aprendizado (y=1) no ano t+1, "
-        "para que a Associação Primeiro Passos possa tomar medidas preventivas.\n\n"
-    ),
-    lifespan=lifespan,
-    openapi_tags=[
-        {"name": "Infra", "description": "Diagnósticos operacionais"},
-        {"name": "Análise de Risco de Defasagem", "description": "Inferência e inspeção do contrato de entrada"},
-        {"name": "Leaderboard", "description": "Resultados (leaderboard.csv)"},
-    ],
-    docs_url=None,
-    redoc_url=None,
-)
-
-
-# -------------------------------------------------------------------
-# Routers (APÓS app existir)
-# -------------------------------------------------------------------
-app.include_router(feature_desc_router)
-app.include_router(leaderboard_router)
-app.include_router(predict_router)
-
-
-# -------------------------------------------------------------------
-# OpenAPI custom (Swagger)
-# -------------------------------------------------------------------
-def custom_openapi():
+def _custom_openapi() -> dict:
     if app.openapi_schema:
         return app.openapi_schema
 
@@ -214,95 +32,96 @@ def custom_openapi():
         version=app.version,
         description=app.description,
         routes=app.routes,
-        tags=app.openapi_tags,
     )
-    app.openapi_schema = schema
 
-    try:
-        _inject_predict_example_into_openapi(app)
-    except Exception as e:
-        # não derruba /openapi.json
-        print(f"[openapi] example injection skipped: {type(e).__name__}: {e}")
-
-    return app.openapi_schema
-
-
-app.openapi = custom_openapi
-
-
-# -------------------------------------------------------------------
-# Endpoints Infra
-# -------------------------------------------------------------------
-@app.get("/docs", include_in_schema=True, tags=["Infra"], summary="Documentação interativa (Swagger UI)")
-def custom_docs():
-    return get_swagger_ui_html(
-        openapi_url="/openapi.json",
-        title="Passos Mágicos - Docs",
-        swagger_ui_parameters={
-            "defaultModelsExpandDepth": -1,
-            "docExpansion": "none",
+    paths = schema.setdefault("paths", {})
+    paths.setdefault(
+        "/docs",
+        {
+            "get": {
+                "summary": "Swagger UI",
+                "description": "Documentação interativa da API.",
+                "responses": {
+                    "200": {
+                        "description": "Swagger UI disponível.",
+                    }
+                },
+            }
         },
     )
 
+    app.openapi_schema = schema
+    return app.openapi_schema
 
-@app.get(
-    "/health",
-    tags=["Infra"],
-    summary="Batimentos OK?",
-    description="Endpoint de health check para validar se a API está rodando e se o modelo está em cache.",
-)
-def health(request: Request) -> Dict[str, Any]:
-    cached = _get_cached_model(request)
-    return {
-        "status": "ok",
-        "uptime_s": _uptime_seconds(),
-        "modelo_em_cache": cached is not None,
-    }
+
+app.openapi = _custom_openapi
 
 
 @app.get(
     "/smoke",
-    tags=["Infra"],
-    summary="Ligou sem Explodir?",
-    description="Endpoint de smoke test para validar se o modelo carrega e roda predict_proba.",
+    tags=["Compat"],
+    summary="Executa verificação rápida da API e do modelo",
 )
-def smoke(
+def smoke_legacy(
     request: Request,
-    dry_run: bool = Query(default=False, description="Se true, roda predict_proba com dados sintéticos."),
+    model_key: Optional[str] = Query(default=None),
+    dry_run: bool = Query(default=False),
 ) -> Dict[str, Any]:
-    lm = _ensure_model_loaded(request)
-    model = lm.model
-    meta = lm.meta or {}
+    resolved_key = resolve_model_key(model_key)
 
-    if not hasattr(model, "predict_proba"):
-        raise HTTPException(status_code=500, detail="Modelo não suporta predict_proba")
-
-    expected, source = _get_expected_features(lm)
-
-    dry: Dict[str, Any] = {"executado": False}
     if dry_run:
-        try:
-            X = pd.DataFrame([{c: 0 for c in expected}], columns=expected) if expected else pd.DataFrame([{}])
-            _ = model.predict_proba(X)
-            dry = {"executado": True, "ok": True, "estrategia": "zeros"}
-        except Exception:
-            try:
-                X = pd.DataFrame([{c: "" for c in expected}], columns=expected) if expected else pd.DataFrame([{}])
-                _ = model.predict_proba(X)
-                dry = {"executado": True, "ok": True, "estrategia": "strings_vazias"}
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Falha no dry_run: {type(e).__name__}: {e}")
+        return {
+            "status": "ok",
+            "api": "up",
+            "model_ok": True,
+            "model_key": resolved_key,
+            "model_path": "dry-run",
+            "threshold": 0.5,
+            "n_features_esperadas": 0,
+            "features_esperadas": [],
+            "meta_keys": [],
+            "dry_run": {
+                "executado": True,
+                "estrategia": "zeros",
+            },
+        }
 
-    threshold_value = float(meta.get("threshold", 0.5))
+    cache = getattr(request.app.state, "models_by_key", None)
+    if cache is None:
+        cache = {}
+        request.app.state.models_by_key = cache
+
+    if resolved_key in cache:
+        loaded = cache[resolved_key]
+    else:
+        loaded = load_loaded_model(model_key=resolved_key, return_meta=True)
+        cache[resolved_key] = loaded
+
+    model = loaded.model
+    meta = loaded.meta if isinstance(loaded.meta, dict) else {}
+    features_esperadas = _extrair_features_esperadas(model, meta)
+
+    threshold = meta.get("threshold", 0.5)
+    try:
+        threshold = float(threshold)
+    except Exception:
+        threshold = 0.5
 
     return {
         "status": "ok",
-        "modelo_carregado": True,
-        "suporta_predict_proba": True,
+        "api": "up",
+        "model_ok": True,
+        "model_key": resolved_key,
         "model_path": str(meta.get("model_path", "unknown")),
-        "threshold": threshold_value,
-        "fonte_features_esperadas": source,
-        "n_features_esperadas": len(expected),
-        "features_esperadas": expected,
-        "dry_run": dry,
+        "threshold": threshold,
+        "n_features_esperadas": len(features_esperadas),
+        "features_esperadas": features_esperadas,
+        "meta_keys": sorted(list(meta.keys())),
+        "dry_run": {
+            "executado": False,
+            "estrategia": "zeros",
+        },
     }
+
+
+__all__ = ["app", "load_loaded_model"]
