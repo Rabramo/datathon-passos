@@ -48,6 +48,21 @@ app.include_router(predict_router)
 # -------------------------------------------------------------------
 
 @app.get(
+    "/",
+    tags=["Infra"],
+    summary="Página inicial da API",
+)
+def root() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "message": "Passos Mágicos - Defasagem API",
+        "docs": "/docs",
+        "health": "/health",
+        "openapi": "/openapi.json",
+    }
+
+
+@app.get(
     "/health",
     tags=["Infra"],
     summary="Verifica se a API está viva",

@@ -108,6 +108,7 @@ Documentação:
 - OpenAPI: `http://127.0.0.1:8000/openapi.json`
 
 Endpoints principais:
+- `GET /`
 - `GET /health` e `GET /infra/health`
 - `GET /smoke` e `GET /infra/smoke`
 - `GET /model`, `GET /predict/model`, `GET /infra/model`
@@ -141,11 +142,12 @@ URL pública da API em produção:
 - `https://datathon-passos-api-ra363736.onrender.com`
 
 Observação:
-- A rota raiz `/` retorna `404` por padrão. Use `/health`, `/docs` ou `/openapi.json`.
+- A rota raiz `/` retorna um payload simples com links úteis da API.
 
 Validações rápidas em produção:
 
 ```bash
+curl -sS https://datathon-passos-api-ra363736.onrender.com/
 curl -sS https://datathon-passos-api-ra363736.onrender.com/health
 curl -sS https://datathon-passos-api-ra363736.onrender.com/docs > /dev/null
 curl -sS https://datathon-passos-api-ra363736.onrender.com/openapi.json > /dev/null
