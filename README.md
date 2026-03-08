@@ -1,8 +1,44 @@
 # Datathon FIAP MLE - Passos Mágicos
 
-Projeto de Machine Learning Engineering para estimar risco de defasagem escolar (`y=1`) no ano `t+1` usando apenas variáveis observáveis no ano `t`.
+Este projeto foi desenvolvido no contexto do Datathon de Machine Learning Engineering da FIAP com foco no desafio da Associação Passos Mágicos, organização social que atua no apoio educacional de crianças e adolescentes em situação de vulnerabilidade.
 
-O repositório implementa o ciclo ponta a ponta solicitado no Datathon: preparação de dados, treino temporal, avaliação, API de inferência, testes automatizados e containerização.
+No cenário do projeto, a principal necessidade é identificar com antecedência alunos que podem entrar em defasagem de aprendizagem, para que a equipe pedagógica consiga intervir antes que o problema se consolide. Em vez de atuar apenas de forma reativa (quando a defasagem já aconteceu), a proposta é habilitar uma atuação pró-ativa, com priorização de acompanhamento, reforço e suporte individual.
+
+Para isso, a solução estima o risco de defasagem escolar no ano `t+1` (`y=1`) usando apenas variáveis disponíveis no ano `t`, respeitando a lógica temporal e evitando vazamento de informação futura. O repositório implementa o ciclo ponta a ponta do problema: preparação de dados, treino temporal, avaliação, API de inferência, testes automatizados, deploy e monitoramento contínuo.
+
+## Acesso rápido (Render - produção)
+
+API em produção:
+- `https://datathon-passos-api-ra363736.onrender.com`
+
+Swagger em produção (prioritário):
+- `https://datathon-passos-api-ra363736.onrender.com/docs`
+
+OpenAPI:
+- `https://datathon-passos-api-ra363736.onrender.com/openapi.json`
+
+Healthcheck:
+- `https://datathon-passos-api-ra363736.onrender.com/health`
+
+Observação:
+- A rota raiz `/` retorna um payload simples com links úteis da API.
+
+## Uso com Docker (recomendado)
+
+Build:
+
+```bash
+docker build -t passos-magicos-api .
+```
+
+Run:
+
+```bash
+docker run --rm -p 8000:8000 passos-magicos-api
+```
+
+Swagger local via Docker:
+- `http://127.0.0.1:8000/docs`
 
 ## Objetivo de negócio
 
@@ -35,17 +71,44 @@ Pipeline temporal:
 - `tests`: suíte de testes unitários/integrados.
 - `artifacts`: modelos, métricas, leaderboard e ponteiros.
 
-## Tecnologias
+## Stack técnico consolidado por categoria
 
-- Python 3.12
-- pandas, numpy, pyarrow, scikit-learn
-- xgboost, catboost
-- FastAPI + Uvicorn
-- joblib para serialização
-- pytest + coverage
+1. Desenvolvimento
+- Python
+- Estrutura modular em `src/`
+- Testes automatizados com `pytest`
+- Cobertura com `coverage`
+
+2. ML/MLOps
+- Pipeline de treino temporal
+- Feature engineering
+- Avaliação de modelos
+- Versionamento de artefatos
+- Monitoramento de drift
+- Relatórios automáticos de drift
+- Alertas automáticos
+
+3. API
+- FastAPI
+- OpenAPI/Swagger
+- Serving via endpoints HTTP
+
+4. DevOps / Plataforma
 - Docker
+- GitHub
+- GitHub Actions
+- Render
+- Secrets no GitHub Actions
+- Deploy hook
+- Webhooks para alertas
 
-## Como executar localmente
+5. Observabilidade operacional
+- Drift monitoring agendado
+- Execução manual e agendada
+- Artifact upload
+- Exit code crítico em caso de alerta
+
+## Execução local (desenvolvimento)
 
 Pré-requisitos:
 - Python 3.12+
@@ -120,10 +183,9 @@ Endpoints principais:
 Exemplo de inferência:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/predict" \
+curl -X POST "http://127.0.0.1:8000/predict?model_key=logreg" \
   -H "Content-Type: application/json" \
   -d '{
-    "model_key": "logreg",
     "features": {
       "fase": 5,
       "turma": "A",
@@ -136,15 +198,7 @@ curl -X POST "http://127.0.0.1:8000/predict" \
   }'
 ```
 
-## Deploy no Render (produção)
-
-URL pública da API em produção:
-- `https://datathon-passos-api-ra363736.onrender.com`
-
-Observação:
-- A rota raiz `/` retorna um payload simples com links úteis da API.
-
-Validações rápidas em produção:
+## Validação em produção (Render)
 
 ```bash
 curl -sS https://datathon-passos-api-ra363736.onrender.com/
@@ -156,10 +210,9 @@ curl -sS https://datathon-passos-api-ra363736.onrender.com/openapi.json > /dev/n
 Exemplo de predição em produção:
 
 ```bash
-curl -X POST "https://datathon-passos-api-ra363736.onrender.com/predict" \
+curl -X POST "https://datathon-passos-api-ra363736.onrender.com/predict?model_key=logreg" \
   -H "Content-Type: application/json" \
   -d '{
-    "model_key": "logreg",
     "features": {
       "fase": 5,
       "turma": "A",
@@ -170,20 +223,6 @@ curl -X POST "https://datathon-passos-api-ra363736.onrender.com/predict" \
       "idade": 13
     }
   }'
-```
-
-## Docker
-
-Build:
-
-```bash
-docker build -t passos-magicos-api .
-```
-
-Run:
-
-```bash
-docker run --rm -p 8000:8000 passos-magicos-api
 ```
 
 ## Testes
@@ -274,21 +313,3 @@ Secret opcional para alerta:
 - Métricas salvas em JSON por execução.
 - Ponteiros `latest_*.json` para resolver modelo ativo por chave.
 - Leaderboard consolidado para comparação entre experimentos.
-
-## Critérios do Datathon e status
-
-- Pipeline completo de ML (pré-processamento -> treino -> avaliação -> inferência): atendido.
-- Serialização e carregamento de modelo para produção: atendido.
-- API de predição com contrato e validações: atendido.
-- Testes automatizados e cobertura mínima: atendido.
-- Containerização para execução isolada: atendido.
-- Documentação técnica de execução e uso: atendido.
-
-## O que ainda pode evoluir (não bloqueante)
-
-- Deploy gerenciado em nuvem (Cloud Run/Render/Heroku) com IaC.
-- Evoluir fonte de monitoramento para dados online de produção (eventos reais de inferência).
-
-## Resultado atual
-
-O projeto está tecnicamente consistente para entrega acadêmica e demonstra, de forma reprodutível, os componentes exigidos para um fluxo MLE de ponta a ponta no contexto do problema proposto.
