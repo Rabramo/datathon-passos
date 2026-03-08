@@ -6,6 +6,10 @@ No cenário do projeto, a principal necessidade é identificar com antecedência
 
 Para isso, a solução estima o risco de defasagem escolar no ano `t+1` (`y=1`) usando apenas variáveis disponíveis no ano `t`, respeitando a lógica temporal e evitando vazamento de informação futura. O repositório implementa o ciclo ponta a ponta do problema: preparação de dados, treino temporal, avaliação, API de inferência, testes automatizados, deploy e monitoramento contínuo.
 
+**API desenvolvida para o Datathon 2026/MLOps - Pós Tech FIAP Machine Learning Engineering**
+
+**Aluno: Rogerio Abramo A. Pretti | RA 363736 | Grupo 150 | 5MLET**
+
 ## Acesso rápido em produção (Render)
 
 API em produção:
@@ -337,6 +341,11 @@ Funcionamento:
 
 Secret opcional para alerta:
 - `DRIFT_ALERT_WEBHOOK_URL`: webhook (Slack/Discord/Teams) para alertas.
+
+Canal de alerta (Discord):
+- Você pode usar um webhook de canal do Discord para receber os alertas de drift.
+- Passo a passo: `Discord -> Editar canal -> Integrações -> Webhooks -> Novo webhook -> Copiar URL`.
+- Salve essa URL no secret `DRIFT_ALERT_WEBHOOK_URL` no GitHub Actions.
 
 ## Rastreabilidade de artefatos
 
